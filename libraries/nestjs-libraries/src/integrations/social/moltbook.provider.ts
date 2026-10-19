@@ -12,6 +12,29 @@ import { Integration } from '@prisma/client';
 
 const MOLTBOOK_API_BASE = 'https://www.moltbook.com/api/v1';
 
+// AxiosError carries the full request config on `err.config` (and in
+// `err.toJSON()`), including the `Authorization: Bearer <apiKey>` header this
+// provider sends on every call. Letting that raw error escape (thrown,
+// logged, or returned to a caller) leaks the agent's API key wherever it ends
+// up - Sentry, activity failure details, or an error response. Every axios
+// call in this provider must be caught and converted with this helper before
+// it can propagate.
+function sanitizeAxiosError(err: any, fallback: string): Error {
+  const data = err?.response?.data;
+  const message =
+    (data && typeof data === 'object' && typeof data.error === 'string'
+      ? data.error
+      : undefined) ||
+    (err?.response?.status
+      ? `Moltbook request failed with status ${err.response.status}`
+      : undefined) ||
+    fallback;
+
+  // A plain Error carries only `message`/`stack` - never the axios config,
+  // so there is no Authorization header left for anything downstream to log.
+  return new Error(message);
+}
+
 export class MoltbookProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 100; // Moltbook: 100 requests/minute
   identifier = 'moltbook';
@@ -48,11 +71,16 @@ export class MoltbookProvider extends SocialAbstract implements SocialProvider {
   }
 
   async registerAgent(name: string, description: string) {
-    const response = await this.getSsrfSafeAxios().post(
-      `${MOLTBOOK_API_BASE}/agents/register`,
-      { name, description },
-      { headers: { 'Content-Type': 'application/json' } }
-    );
+    let response;
+    try {
+      response = await this.getSsrfSafeAxios().post(
+        `${MOLTBOOK_API_BASE}/agents/register`,
+        { name, description },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+    } catch (err: any) {
+      throw sanitizeAxiosError(err, 'Registration failed');
+    }
 
     if (!response.data.success) {
       throw new Error(response.data.error || 'Registration failed');
@@ -62,23 +90,32 @@ export class MoltbookProvider extends SocialAbstract implements SocialProvider {
   }
 
   async checkAgentStatus(apiKey: string) {
-    const response = await this.getSsrfSafeAxios().get(
-      `${MOLTBOOK_API_BASE}/agents/status`,
-      {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      }
-    );
+    try {
+      const response = await this.getSsrfSafeAxios().get(
+        `${MOLTBOOK_API_BASE}/agents/status`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
 
-    return response.data;
+      return response.data;
+    } catch (err: any) {
+      throw sanitizeAxiosError(err, 'Failed to check agent status');
+    }
   }
 
   async getAgentProfile(apiKey: string) {
-    const response = await this.getSsrfSafeAxios().get(
-      `${MOLTBOOK_API_BASE}/agents/me`,
-      {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      }
-    );
+    let response;
+    try {
+      response = await this.getSsrfSafeAxios().get(
+        `${MOLTBOOK_API_BASE}/agents/me`,
+        {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }
+      );
+    } catch (err: any) {
+      throw sanitizeAxiosError(err, 'Failed to get profile');
+    }
 
     if (!response.data.success) {
       throw new Error(response.data.error || 'Failed to get profile');
@@ -127,16 +164,21 @@ export class MoltbookProvider extends SocialAbstract implements SocialProvider {
         content: post.message,
       };
 
-      const response = await this.getSsrfSafeAxios().post(
-        `${MOLTBOOK_API_BASE}/posts`,
-        postData,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      let response;
+      try {
+        response = await this.getSsrfSafeAxios().post(
+          `${MOLTBOOK_API_BASE}/posts`,
+          postData,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } catch (err: any) {
+        throw sanitizeAxiosError(err, 'Failed to create post');
+      }
 
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to create post');
@@ -173,16 +215,21 @@ export class MoltbookProvider extends SocialAbstract implements SocialProvider {
         commentData.parent_id = lastCommentId;
       }
 
-      const response = await this.getSsrfSafeAxios().post(
-        `${MOLTBOOK_API_BASE}/posts/${postId}/comments`,
-        commentData,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      let response;
+      try {
+        response = await this.getSsrfSafeAxios().post(
+          `${MOLTBOOK_API_BASE}/posts/${postId}/comments`,
+          commentData,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } catch (err: any) {
+        throw sanitizeAxiosError(err, 'Failed to create comment');
+      }
 
       if (!response.data.success) {
         throw new Error(response.data.error || 'Failed to create comment');

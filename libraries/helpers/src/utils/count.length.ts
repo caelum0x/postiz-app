@@ -44,7 +44,13 @@ export const countLength = (integrationType: string, text: string): number => {
   }
 
   if (integrationType === 'threads') {
-    return new TextEncoder().encode(text).length;
+    // Threads counts Unicode codepoints, not UTF-8 bytes or UTF-16 code
+    // units. TextEncoder().encode(text).length counted bytes (e.g. 2-4 per
+    // non-ASCII character), and a plain text.length over-counts characters
+    // outside the BMP (emoji, some CJK) because they are UTF-16 surrogate
+    // pairs. Array.from splits on codepoints, so each character - ASCII,
+    // accented, CJK or emoji - counts once.
+    return Array.from(text).length;
   }
 
   return text.length;

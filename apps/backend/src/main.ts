@@ -59,7 +59,14 @@ async function start() {
     },
   });
 
-  await startMcp(app);
+  // startMcp wires Mastra, which connects to Postgres (pStore) on first use -
+  // a DB outage/misconfiguration there must not take down the entire backend
+  // (every other route, not just /mcp and /copilot) by rejecting start().
+  try {
+    await startMcp(app);
+  } catch (e) {
+    Logger.error('Failed to initialize MCP/Mastra, continuing without it', e);
+  }
 
   app.useGlobalPipes(
     new ValidationPipe({

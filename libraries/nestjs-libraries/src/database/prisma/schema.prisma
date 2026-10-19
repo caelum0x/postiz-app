@@ -9,42 +9,43 @@ datasource db {
 }
 
 model Organization {
-  id                  String               @id @default(uuid())
-  name                String
-  description         String?
-  apiKey              String?
-  paymentId           String?
-  streakSince         DateTime?
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  deletedAt           DateTime?
-  allowTrial          Boolean              @default(false)
-  isTrailing          Boolean              @default(false)
-  shortlink           ShortLinkPreference  @default(ASK)
-  autoPost            AutoPost[]
-  Comments            Comments[]
-  credits             Credits[]
-  clippings           Clipping[]
-  customers           Customer[]
-  errors              Errors[]
-  github              GitHub[]
-  Integration         Integration[]
-  media               Media[]
-  buyerOrganization   MessagesGroup[]
-  notifications       Notifications[]
-  plugs               Plugs[]
-  post                Post[]               @relation("organization")
-  submittedPost       Post[]               @relation("submittedForOrg")
-  sets                Sets[]
-  signatures          Signatures[]
-  subscription        Subscription?
-  tags                Tags[]
-  thirdParty          ThirdParty[]
-  usedCodes           UsedCodes[]
-  users               UserOrganization[]
-  webhooks            Webhooks[]
-  oauthApp            OAuthApp[]
-  oauthAuthorizations OAuthAuthorization[]
+  id                      String                   @id @default(uuid())
+  name                    String
+  description             String?
+  apiKey                  String?
+  paymentId               String?
+  streakSince             DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  deletedAt               DateTime?
+  allowTrial              Boolean                  @default(false)
+  isTrailing              Boolean                  @default(false)
+  shortlink               ShortLinkPreference      @default(ASK)
+  autoPost                AutoPost[]
+  Comments                Comments[]
+  credits                 Credits[]
+  clippings               Clipping[]
+  customers               Customer[]
+  errors                  Errors[]
+  github                  GitHub[]
+  Integration             Integration[]
+  media                   Media[]
+  buyerOrganization       MessagesGroup[]
+  notifications           Notifications[]
+  plugs                   Plugs[]
+  post                    Post[]                   @relation("organization")
+  submittedPost           Post[]                   @relation("submittedForOrg")
+  sets                    Sets[]
+  signatures              Signatures[]
+  subscription            Subscription?
+  tags                    Tags[]
+  thirdParty              ThirdParty[]
+  usedCodes               UsedCodes[]
+  users                   UserOrganization[]
+  webhooks                Webhooks[]
+  oauthApp                OAuthApp[]
+  oauthAuthorizations     OAuthAuthorization[]
+  postEngagementSnapshots PostEngagementSnapshot[]
 
   @@index([apiKey])
   @@index([streakSince])
@@ -365,36 +366,37 @@ model Customer {
 }
 
 model Integration {
-  id                    String                 @id @default(cuid())
-  internalId            String
-  organizationId        String
-  name                  String
-  customName            String?
-  picture               String?
-  providerIdentifier    String
-  type                  String
-  token                 String
-  disabled              Boolean                @default(false)
-  tokenExpiration       DateTime?
-  refreshToken          String?
-  profile               String?
-  deletedAt             DateTime?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime?              @updatedAt
-  inBetweenSteps        Boolean                @default(false)
-  refreshNeeded         Boolean                @default(false)
-  postingTimes          String                 @default("[{\"time\":120}, {\"time\":400}, {\"time\":700}]")
-  customInstanceDetails String?
-  customerId            String?
-  rootInternalId        String?
-  additionalSettings    String?                @default("[]")
-  exisingPlugData       ExisingPlugData[]
-  customer              Customer?              @relation(fields: [customerId], references: [id])
-  organization          Organization           @relation(fields: [organizationId], references: [id])
-  webhooks              IntegrationsWebhooks[]
-  orderItems            OrderItems[]
-  plugs                 Plugs[]
-  posts                 Post[]
+  id                      String                   @id @default(cuid())
+  internalId              String
+  organizationId          String
+  name                    String
+  customName              String?
+  picture                 String?
+  providerIdentifier      String
+  type                    String
+  token                   String
+  disabled                Boolean                  @default(false)
+  tokenExpiration         DateTime?
+  refreshToken            String?
+  profile                 String?
+  deletedAt               DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime?                @updatedAt
+  inBetweenSteps          Boolean                  @default(false)
+  refreshNeeded           Boolean                  @default(false)
+  postingTimes            String                   @default("[{\"time\":120}, {\"time\":400}, {\"time\":700}]")
+  customInstanceDetails   String?
+  customerId              String?
+  rootInternalId          String?
+  additionalSettings      String?                  @default("[]")
+  exisingPlugData         ExisingPlugData[]
+  customer                Customer?                @relation(fields: [customerId], references: [id])
+  organization            Organization             @relation(fields: [organizationId], references: [id])
+  webhooks                IntegrationsWebhooks[]
+  orderItems              OrderItems[]
+  plugs                   Plugs[]
+  posts                   Post[]
+  postEngagementSnapshots PostEngagementSnapshot[]
 
   @@unique([organizationId, internalId])
   @@index([rootInternalId])
@@ -496,6 +498,7 @@ model Post {
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
   tags                       TagsPosts[]
+  postEngagementSnapshot     PostEngagementSnapshot?
 
   @@index([group])
   @@index([batchId])
@@ -513,6 +516,40 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
+}
+
+// One row per Post, captured at most once (postId is unique, upserted in
+// place) by the bounded daily best-time-to-post batch job - see
+// PostEngagementService.captureBatch. This caps total rows at the number of
+// posts ever published and caps provider analytics calls to a hard batch
+// limit per run, instead of calling providers live on every page view.
+// engagementScore is null when the platform returned no usable metrics (no
+// postAnalytics capability, or an unavailable/pending release discovered at
+// capture time) - those rows exist only to mark the post as permanently
+// attempted so it is never re-queued, and are excluded from the aggregation
+// in PostEngagementRepository. A transient failure (provider timeout, rate
+// limit) does NOT create a row - see captureBatch - so the post stays a
+// candidate and is retried on a later run.
+// No deletedAt: unlike user-owned content, every row here is derived and
+// cheaply re-derivable, so there is nothing to soft-delete/restore.
+model PostEngagementSnapshot {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  integrationId      String
+  postId             String       @unique
+  providerIdentifier String
+  publishDate        DateTime
+  dayOfWeek          Int
+  hourOfDay          Int
+  engagementScore    Float?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  organization       Organization @relation(fields: [organizationId], references: [id])
+  integration        Integration  @relation(fields: [integrationId], references: [id])
+  post               Post         @relation(fields: [postId], references: [id])
+
+  @@index([integrationId, dayOfWeek, hourOfDay])
+  @@index([organizationId])
 }
 
 model Notifications {

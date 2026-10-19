@@ -1273,7 +1273,9 @@ export class PostsService {
     const rawPosts = [
       {
         integration: { id: integrationId },
-        value: [{ content, image: [] }],
+        value: [
+          { content, image: [] as Array<{ path: string; thumbnail?: string }> },
+        ],
         settings: { __type: providerIdentifier },
       },
     ];

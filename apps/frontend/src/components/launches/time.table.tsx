@@ -9,6 +9,7 @@ import { Button } from '@gitroom/react/form/button';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
+import useSWR from 'swr';
 // @ts-ignore
 import useKeypress from 'react-use-keypress';
 import { useModals } from '@gitroom/frontend/components/layout/new-modal';
@@ -33,6 +34,36 @@ const hours = [...Array(24).keys()].map((i) => ({
 const minutes = [...Array(60).keys()].map((i) => ({
   value: i,
 }));
+
+export interface BestTimeSuggestion {
+  dayOfWeek: number;
+  hourOfDay: number;
+  avgEngagement: number;
+  sampleSize: number;
+}
+
+interface BestTimesResponse {
+  hasData: boolean;
+  suggestions: BestTimeSuggestion[];
+}
+
+// Separate hook per SWR call, per project convention (rules-of-hooks).
+// Reads only the pre-aggregated /analytics/best-time endpoint - no live
+// provider calls happen on render, the data is populated by a bounded daily
+// batch job on the backend.
+const useBestTimeSuggestions = (integrationId: string) => {
+  const fetch = useFetch();
+  const load = useCallback(async () => {
+    const response = await fetch(`/analytics/best-time/${integrationId}`);
+    return (await response.json()) as BestTimesResponse;
+  }, [integrationId]);
+
+  return useSWR<BestTimesResponse>(`best-time-${integrationId}`, load, {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    fallbackData: { hasData: false, suggestions: [] },
+  });
+};
 
 export const TimeTable: FC<{
   integration: Integrations;
@@ -116,6 +147,35 @@ export const TimeTable: FC<{
     );
   }, [currentTimes]);
 
+  const { data: bestTimes, isLoading: bestTimesLoading } =
+    useBestTimeSuggestions(props.integration.id);
+
+  const dayLabels = useMemo(
+    () => [
+      t('sunday_short', 'Sun'),
+      t('monday_short', 'Mon'),
+      t('tuesday_short', 'Tue'),
+      t('wednesday_short', 'Wed'),
+      t('thursday_short', 'Thu'),
+      t('friday_short', 'Fri'),
+      t('saturday_short', 'Sat'),
+    ],
+    [t]
+  );
+
+  const addSuggestedTime = useCallback(
+    (hourOfDay: number) => () => {
+      // Suggestions are computed in UTC (see PostEngagementService), and the
+      // stored `time` field is already "minutes since UTC midnight" - same
+      // unit the display formatter above assumes - so no offset math here.
+      const value = hourOfDay * 60;
+      setCurrentTimes((prev) =>
+        prev.some((p) => p.time === value) ? prev : [...prev, { time: value }]
+      );
+    },
+    []
+  );
+
   const save = useCallback(async () => {
     await fetch(`/integrations/${props.integration.id}/time`, {
       method: 'POST',
@@ -129,6 +189,63 @@ export const TimeTable: FC<{
 
   return (
     <div className="relative w-full max-w-[400px] mx-auto">
+      {/* Suggested Best Times Section */}
+      <div className="bg-newBgColorInner rounded-[12px] p-[20px] border border-newTableBorder mb-[20px]">
+        <div className="text-[15px] font-semibold mb-[8px] flex items-center gap-[8px]">
+          <DelayIcon size={18} className="text-[#612BD3]" />
+          {t('suggested_best_times', 'Suggested Best Times')}
+        </div>
+        <div className="text-[12px] text-newTextColor/50 mb-[12px]">
+          {t(
+            'suggested_best_times_description',
+            'Based on how your own past posts on this channel performed, grouped by day and hour (UTC).'
+          )}
+        </div>
+
+        {bestTimesLoading ? (
+          <div className="text-center py-[16px] text-newTextColor/40 text-[13px]">
+            {t('loading', 'Loading...')}
+          </div>
+        ) : !bestTimes?.hasData ? (
+          <div className="text-center py-[16px] px-[12px] text-newTextColor/40 text-[13px] border border-dashed border-newTableBorder rounded-[8px]">
+            {t(
+              'not_enough_post_history_yet',
+              "Not enough published post history yet. Keep posting - we'll surface your best times once we have enough data."
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-[8px]">
+            {bestTimes.suggestions.map((suggestion) => (
+              <div
+                key={`${suggestion.dayOfWeek}-${suggestion.hourOfDay}`}
+                className="flex items-center justify-between h-[44px] px-[14px] rounded-[8px] bg-newBgColorInner border border-newTableBorder"
+              >
+                <div className="flex items-center gap-[10px]">
+                  <div className="w-[8px] h-[8px] rounded-full bg-[#32d583]" />
+                  <span className="text-[14px] font-medium">
+                    {dayLabels[suggestion.dayOfWeek]}{' '}
+                    {suggestion.hourOfDay.toString().padStart(2, '0')}:00 UTC
+                  </span>
+                  <span className="text-[12px] text-newTextColor/40">
+                    {t('based_on_n_posts', 'based on {{count}} posts', {
+                      count: suggestion.sampleSize,
+                    })}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={addSuggestedTime(suggestion.hourOfDay)}
+                  className="h-[32px] px-[12px] bg-[#612BD3]/10 hover:bg-[#612BD3]/20 transition-colors rounded-[6px] flex items-center gap-[6px] text-[#612BD3] text-[13px] font-medium"
+                >
+                  <PlusIcon size={12} />
+                  {t('add', 'Add')}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Add Time Slot Section */}
       <div className="bg-newBgColorInner rounded-[12px] p-[20px] border border-newTableBorder">
         <div className="text-[15px] font-semibold mb-[16px] flex items-center gap-[8px]">

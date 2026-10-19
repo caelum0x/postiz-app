@@ -34,6 +34,8 @@ import {
   ResolveCommentDto,
 } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
 import { RealIP } from 'nestjs-real-ip';
+import { BulkScheduleDto } from '@gitroom/nestjs-libraries/dtos/posts/bulk.schedule.dto';
+import { simpleTextProviders } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/all.providers.settings';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -246,6 +248,23 @@ export class PostsController {
 
     const body = await this._postsService.mapTypeToPost(rawBody, org.id);
     return this._postsService.createPost(org.id, body, 'WEB');
+  }
+
+  @Get('/bulk-schedule/supported-providers')
+  bulkScheduleSupportedProviders() {
+    // Single source of truth for which providers bulk CSV import can
+    // target — same generic, data-driven list the backend enforces in
+    // bulkSchedule(), so the frontend channel picker never drifts from it.
+    return { providers: simpleTextProviders() };
+  }
+
+  @Post('/bulk-schedule')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  async bulkSchedule(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: BulkScheduleDto
+  ) {
+    return this._postsService.bulkSchedule(org.id, body);
   }
 
   @Post('/generator/draft')

@@ -114,3 +114,20 @@ export class EmptySettings {
   })
   __type: string;
 }
+
+// A provider "needs settings" when `allProviders()` (called without a
+// fallback) lists a real settings DTO for it; providers backed by
+// `EmptySettings` (threads, mastodon, bluesky, telegram, nostr, vk) don't
+// need anything beyond `__type`. Bulk CSV import only has a bare
+// date/content per row, so it can only safely target those providers —
+// this is the single, generic, data-driven source of truth for that check,
+// never a hardcoded per-provider branch.
+export const providerNeedsSettings = (providerIdentifier: string): boolean => {
+  return allProviders().some((p) => p.name === providerIdentifier);
+};
+
+export const simpleTextProviders = (): string[] => {
+  return allProviders(EmptySettings)
+    .map((p) => p.name)
+    .filter((name) => !providerNeedsSettings(name));
+};

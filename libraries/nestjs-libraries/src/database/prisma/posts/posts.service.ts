@@ -1,11 +1,20 @@
 import {
   BadRequestException,
+  HttpException,
   Injectable,
   NotFoundException,
   ValidationPipe,
 } from '@nestjs/common';
 import { PostsRepository } from '@gitroom/nestjs-libraries/database/prisma/posts/posts.repository';
 import { CreatePostDto } from '@gitroom/nestjs-libraries/dtos/posts/create.post.dto';
+import {
+  BulkScheduleDto,
+  BulkScheduleRowResult,
+} from '@gitroom/nestjs-libraries/dtos/posts/bulk.schedule.dto';
+import {
+  providerNeedsSettings,
+  simpleTextProviders,
+} from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/all.providers.settings';
 import dayjs from 'dayjs';
 import { IntegrationManager } from '@gitroom/nestjs-libraries/integrations/integration.manager';
 import {
@@ -55,7 +64,10 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { stripHtmlValidation } from '@gitroom/helpers/utils/strip.html.validation';
 import { postContentPlainText } from '@gitroom/helpers/utils/sanitize.post.content';
-import { CreatePublicCommentDto } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
+import {
+  ApprovePostDto,
+  CreatePublicCommentDto,
+} from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
 import { countLength } from '@gitroom/helpers/utils/count.length';
 
 type PostWithConditionals = Post & {
@@ -1193,6 +1205,123 @@ export class PostsService {
     return postList;
   }
 
+  // Bulk CSV scheduling: each row goes through the exact same
+  // validatePosts -> mapTypeToPost -> createPost pipeline as a single post
+  // created from the web UI (see PostsController#createPost), just looped.
+  // A bad row never aborts the batch — every row gets its own result so the
+  // caller can show which ones scheduled and which didn't, same spirit as
+  // Buffer's bulk upload ("schedule what's valid, report the rest").
+  async bulkSchedule(
+    orgId: string,
+    body: BulkScheduleDto
+  ): Promise<BulkScheduleRowResult[]> {
+    const integration = await this._integrationService.getIntegrationById(
+      orgId,
+      body.integration.id
+    );
+
+    if (!integration) {
+      throw new BadRequestException(
+        `Integration with id ${body.integration.id} not found`
+      );
+    }
+
+    const providerIdentifier = integration.providerIdentifier;
+    if (providerNeedsSettings(providerIdentifier)) {
+      throw new BadRequestException(
+        `Bulk CSV scheduling only supports simple text platforms right now (${simpleTextProviders().join(
+          ', '
+        )}). "${providerIdentifier}" needs extra settings that can't be filled from a spreadsheet yet.`
+      );
+    }
+
+    const results: BulkScheduleRowResult[] = [];
+    for (let row = 0; row < body.posts.length; row++) {
+      try {
+        const postId = await this.createPostFromBulkRow(
+          orgId,
+          body.integration.id,
+          providerIdentifier,
+          body.posts[row].date,
+          body.posts[row].content,
+          body.shortLink ?? false
+        );
+        results.push({ row, success: true, postId });
+      } catch (err) {
+        results.push({
+          row,
+          success: false,
+          error:
+            err instanceof HttpException
+              ? err.message
+              : 'Could not schedule this row',
+        });
+      }
+    }
+
+    return results;
+  }
+
+  private async createPostFromBulkRow(
+    orgId: string,
+    integrationId: string,
+    providerIdentifier: string,
+    date: string,
+    content: string,
+    shortLink: boolean
+  ): Promise<string> {
+    const rawPosts = [
+      {
+        integration: { id: integrationId },
+        value: [{ content, image: [] }],
+        settings: { __type: providerIdentifier },
+      },
+    ];
+
+    const validation = await this.validatePosts(orgId, rawPosts);
+    for (const item of validation) {
+      if (item.emptyContent) {
+        throw new BadRequestException(
+          'Your post should have at least one character or one image.'
+        );
+      }
+      if (!item.valid) {
+        throw new BadRequestException(
+          item.settingsError || 'Please fix your settings'
+        );
+      }
+      if (item.errors !== true) {
+        throw new BadRequestException(item.errors as string);
+      }
+      if (item.tooLong) {
+        throw new BadRequestException('Post is too long, please fix it');
+      }
+    }
+
+    const mapped = await this.mapTypeToPost(
+      {
+        type: 'schedule',
+        shortLink,
+        date,
+        tags: [],
+        posts: rawPosts,
+      } as unknown as CreatePostDto,
+      orgId
+    );
+
+    const created = await this.createPost(
+      orgId,
+      mapped,
+      CreationMethod.BULK_CSV
+    );
+
+    if (!created?.length) {
+      throw new BadRequestException('Could not schedule this post');
+    }
+
+    return created[0].postId;
+  }
+
   // Update ONLY the provider settings of a not-yet-published post (scheduled or
   // draft). The passed keys are merged into the existing settings; content and
   // publish date stay as they are, so the running publish workflow is left
@@ -1585,6 +1714,7 @@ export class PostsService {
       anchorEnd: comment.anchorEnd,
       anchorQuote: comment.anchorQuote,
       resolvedAt: comment.resolvedAt,
+      isApproval: comment.isApproval,
       createdAt: comment.createdAt,
       name: comment.userId
         ? [comment.user?.name, comment.user?.lastName]
@@ -1669,6 +1799,72 @@ export class PostsService {
         anchorQuote: hasStart ? body.anchorQuote : undefined,
       }
     );
+  }
+
+  // Lets the client who was sent the public preview link approve a draft
+  // directly, without logging in. Mirrors createPublicComment's identity
+  // checks (name + recaptcha), then does exactly what the "schedule" button
+  // already does internally: flips the post from DRAFT to QUEUE so the
+  // existing publish workflow picks it up. Only drafts can be approved, so
+  // this never touches a post that's already queued/published/erroring.
+  async approvePublicPost(
+    previewId: string,
+    body: ApprovePostDto,
+    userId: string | null,
+    ip: string
+  ) {
+    const posts = await this.getPostsRecursively(previewId, false);
+    if (!posts.length) {
+      throw new NotFoundException('Post not found');
+    }
+
+    const post = body.postId
+      ? posts.find((p) => p.id === body.postId)
+      : posts[0];
+    if (!post) {
+      throw new BadRequestException('Post does not belong to this preview');
+    }
+
+    if (post.state !== State.DRAFT) {
+      throw new BadRequestException(
+        'Only drafts awaiting approval can be approved'
+      );
+    }
+
+    let displayName: string | undefined;
+    if (!userId) {
+      if (!body.displayName?.trim()) {
+        throw new BadRequestException('Name is required');
+      }
+      displayName = body.displayName.trim();
+      await this.verifyRecaptcha(body.recaptchaToken, ip);
+    }
+
+    await this._postRepository.createComment(
+      post.organizationId,
+      userId,
+      post.id,
+      displayName
+        ? `${displayName} approved this post for publishing.`
+        : 'Approved this post for publishing.',
+      {
+        displayName,
+        isApproval: true,
+      }
+    );
+
+    // Reuse the exact same path the internal "schedule" button goes
+    // through (changePostStatus), not a hand-rolled changeState call — it's
+    // the one that also starts the Temporal workflow that actually
+    // publishes the post. A bare changeState(QUEUE) would flip the DB row
+    // but never schedule the real publish.
+    const updated = await this.changePostStatus(
+      post.organizationId,
+      post.id,
+      'schedule'
+    );
+
+    return { success: true, state: updated.state };
   }
 
   private async verifyRecaptcha(token: string | undefined, ip: string) {

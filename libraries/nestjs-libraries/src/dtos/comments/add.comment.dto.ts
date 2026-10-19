@@ -54,3 +54,19 @@ export class ResolveCommentDto {
   @IsBoolean()
   resolved: boolean;
 }
+
+export class ApprovePostDto {
+  @IsOptional()
+  @IsString()
+  postId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  displayName?: string;
+
+  @IsOptional()
+  @IsString()
+  recaptchaToken?: string;
+}

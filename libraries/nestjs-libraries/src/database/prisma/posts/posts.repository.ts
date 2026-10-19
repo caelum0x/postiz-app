@@ -1134,6 +1134,7 @@ export class PostsRepository {
       anchorStart?: number;
       anchorEnd?: number;
       anchorQuote?: string;
+      isApproval?: boolean;
     } = {}
   ) {
     return this._comments.model.comments.create({
@@ -1147,6 +1148,7 @@ export class PostsRepository {
         anchorStart: extra.anchorStart ?? null,
         anchorEnd: extra.anchorEnd ?? null,
         anchorQuote: extra.anchorQuote ?? null,
+        isApproval: extra.isApproval ?? false,
       },
     });
   }

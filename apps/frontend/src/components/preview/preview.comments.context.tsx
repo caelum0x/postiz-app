@@ -20,6 +20,7 @@ export interface PreviewComment {
   anchorEnd: number | null;
   anchorQuote: string | null;
   resolvedAt: string | null;
+  isApproval: boolean;
   createdAt: string;
   name: string | null;
 }
@@ -54,6 +55,7 @@ interface PreviewCommentsContextInterface {
   previewId: string;
   postIds: string[];
   organizationId: string;
+  postState: string;
   comments: PreviewComment[];
   isLoading: boolean;
   mutate: () => Promise<any>;
@@ -73,8 +75,9 @@ export const PreviewCommentsProvider: FC<{
   previewId: string;
   postIds: string[];
   organizationId: string;
+  postState: string;
   children: ReactNode;
-}> = ({ previewId, postIds, organizationId, children }) => {
+}> = ({ previewId, postIds, organizationId, postState, children }) => {
   const { data, mutate, isLoading } = useComments(previewId);
   const [pending, setPending] = useState<PendingAnchor | null>(null);
   const [activeThread, setActiveThread] = useState<ActiveThread | null>(null);
@@ -86,6 +89,7 @@ export const PreviewCommentsProvider: FC<{
         previewId,
         postIds,
         organizationId,
+        postState,
         comments: data?.comments || [],
         isLoading,
         mutate,

@@ -436,6 +436,10 @@ model Comments {
   anchorEnd      Int?
   anchorQuote    String?
   resolvedAt     DateTime?
+  // Marks the system comment created when a draft is approved from the
+  // public preview link, so the client/calendar can show an "Approved" trail
+  // without a separate table. Additive, defaults false for all existing rows.
+  isApproval     Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
@@ -1817,6 +1821,7 @@ enum CreationMethod {
   API
   AUTOPOST
   CLI
+  BULK_CSV
 }
 
 enum ShortLinkPreference {

@@ -5,6 +5,7 @@ import { Button } from '@gitroom/react/form/button';
 import { Input } from '@gitroom/react/form/input';
 import { Textarea } from '@gitroom/react/form/textarea';
 import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useFetch } from '@gitroom/helpers/utils/custom.fetch';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
@@ -464,6 +465,135 @@ const ThreadCard: FC<{
   );
 };
 
+const ApprovalSection: FC = () => {
+  const t = useT();
+  const user = useUser();
+  const fetch = useFetch();
+  const toast = useToaster();
+  const modals = useModals();
+  const router = useRouter();
+  const { recaptchaSiteKey } = useVariables();
+  const { previewId, postState, comments, mutate } = usePreviewComments();
+  const [loading, setLoading] = useState(false);
+
+  const approval = useMemo(
+    () => comments.find((c) => c.isApproval && !c.parentId),
+    [comments]
+  );
+
+  const askForName = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        modals.openModal({
+          classNames: {
+            modal: 'bg-transparent text-textColor',
+          },
+          title: t('preview_comment_your_name', 'Your name'),
+          withCloseButton: true,
+          onClose: () => resolve(null),
+          children: (close) => (
+            <ReviewerNameForm
+              onConfirm={(name) => {
+                resolve(name);
+                close();
+              }}
+            />
+          ),
+        });
+      }),
+    [t]
+  );
+
+  const approve = useCallback(async () => {
+    let displayName: string | undefined;
+    let recaptchaToken: string | undefined;
+
+    if (!user?.id) {
+      const name = await askForName();
+      if (!name) {
+        return;
+      }
+      displayName = name;
+
+      if (recaptchaSiteKey) {
+        const token = await loadRecaptchaToken(recaptchaSiteKey).catch(() => {
+          toast.show(
+            t('preview_approve_failed', 'Could not approve this post'),
+            'warning'
+          );
+          return null;
+        });
+        if (!token) {
+          return;
+        }
+        recaptchaToken = token;
+      }
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/public/posts/${previewId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(displayName ? { displayName } : {}),
+          ...(recaptchaToken ? { recaptchaToken } : {}),
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        toast.show(
+          body?.message ||
+            t('preview_approve_failed', 'Could not approve this post'),
+          'warning'
+        );
+        return;
+      }
+
+      toast.show(
+        t('preview_approved', 'Post approved and scheduled'),
+        'success'
+      );
+      await mutate();
+      router.refresh();
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, recaptchaSiteKey, previewId]);
+
+  if (postState !== 'DRAFT' && !approval) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-col gap-[10px] rounded-[8px] border border-newTableBorder p-[12px]">
+      {!!approval && (
+        <div className="text-[13px] text-textItemBlur">
+          ✓{' '}
+          {t(
+            'preview_approved_by',
+            '{{name}} approved this post for publishing.',
+            { name: approval.name || t('reviewer', 'Reviewer') }
+          )}
+        </div>
+      )}
+      {postState === 'DRAFT' && (
+        <>
+          <div className="text-[13px] text-textItemBlur">
+            {t(
+              'preview_approve_hint',
+              'Happy with this draft? Approve it to schedule it for publishing.'
+            )}
+          </div>
+          <Button onClick={approve} loading={loading}>
+            {t('approve_and_schedule', 'Approve & Schedule')}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+};
+
 export const CommentsComponents: FC<{ previewId: string }> = () => {
   const t = useT();
   const user = useUser();
@@ -500,6 +630,7 @@ export const CommentsComponents: FC<{ previewId: string }> = () => {
 
   return (
     <div className="flex flex-col gap-[16px]">
+      <ApprovalSection />
       <div className="text-[18px] font-[600]">{t('comments', 'Comments')}</div>
       <CommentComposer />
       {!isLoading && !threads.length && (

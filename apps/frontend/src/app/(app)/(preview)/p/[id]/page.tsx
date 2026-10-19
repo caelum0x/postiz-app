@@ -52,6 +52,7 @@ export default async function Auth(
       previewId={id}
       postIds={post.map((p: any) => p.id)}
       organizationId={post[0].organizationId}
+      postState={post[0].state}
     >
       <div className="mx-auto w-full max-w-[1346px] p-[12px] flex flex-col gap-[8px] text-newTextColor">
         <div className="flex bg-newBgColorInner rounded-[12px] min-h-[80px] px-[20px] py-[12px] items-center gap-[20px] flex-wrap">

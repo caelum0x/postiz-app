@@ -47,7 +47,7 @@ const EmbeddedBilling = dynamic(
 );
 
 export const FirstBillingComponent = () => {
-  const { stripeClient } = useVariables();
+  const { stripeClient, billingEnabled } = useVariables();
   const user = useUser();
   const dub = useDubClickId();
   const [stripe, setStripe] = useState<null | Promise<Stripe>>(null);
@@ -62,10 +62,20 @@ export const FirstBillingComponent = () => {
   const [datafast_session_id] = useCookie('datafast_session_id', '');
 
   useEffect(() => {
+    // loadStripe injects the js.stripe.com script tag (and its fingerprinting
+    // requests) as soon as it's called, independent of whether the key it's
+    // given is valid. Never call it unless billing is actually turned on for
+    // this deployment - self-hosters without Stripe configured must not have
+    // it loaded just because this component happened to mount.
+    if (!billingEnabled || !stripeClient) {
+      setStripeFailed(true);
+      return;
+    }
+
     const stripePromise = loadStripe(stripeClient);
     stripePromise.catch(() => setStripeFailed(true));
     setStripe(stripePromise);
-  }, []);
+  }, [billingEnabled, stripeClient]);
 
   const loadCheckout = useCallback(async () => {
     return (

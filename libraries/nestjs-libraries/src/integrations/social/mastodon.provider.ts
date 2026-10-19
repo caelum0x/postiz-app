@@ -71,6 +71,17 @@ export class MastodonProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    // Same transient-failure treatment as Tumblr's handleErrors: this.fetch
+    // already retries with backoff (up to 3 attempts) whenever handleErrors
+    // answers 'retry' - without this, a 503 falls through to the generic
+    // `status === 500` branch, which it doesn't match, and fails immediately.
+    if (status === 503) {
+      return {
+        type: 'retry',
+        value: 'Mastodon is temporarily unavailable, retrying.',
+      };
+    }
+
     return undefined;
   }
 

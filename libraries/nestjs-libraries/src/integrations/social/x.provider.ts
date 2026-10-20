@@ -207,6 +207,25 @@ export class XProvider extends SocialAbstract implements SocialProvider {
       };
     }
 
+    // X's v2 API returns an RFC 7807 problem response when the account's API
+    // credits are exhausted, e.g.
+    // {"detail":"credits depleted","status":402,"title":"Payment Required","type":"https://api.x.com/2/problems/credits-depleted"}
+    // Without this, the body falls through every other check here and
+    // fetch() reports a generic "Unknown Error", which hides the real reason
+    // the post never reached X.
+    if (
+      body.includes('credits-depleted') ||
+      body.includes('credits depleted') ||
+      (body.includes('"title":"Payment Required"') &&
+        body.includes('credit'))
+    ) {
+      return {
+        type: 'bad-body',
+        value:
+          'X rejected the post because your account is out of API credits. Add credits to your X API plan, then try again.',
+      };
+    }
+
     if (body.includes('user-suspended')) {
       return {
         type: 'bad-body',

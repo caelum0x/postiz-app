@@ -113,6 +113,20 @@ export class StripeService extends PaymentProviderAbstract {
       return false;
     }
 
+    // India-issued cards: per Stripe's India recurring payments rules, the
+    // networks treat any off-session (merchant-initiated) charge as a
+    // recurring payment. Without a registered mandate the $1 verification
+    // hold below is declined outright, and even with a mandate it sits in
+    // `processing` for ~26h (RBI pre-debit notification) and never reaches
+    // `requires_capture`. Either way a perfectly valid Indian card - one
+    // that already passed 3DS/OTP at Checkout - fails this check and gets
+    // detached/cancelled. Trust the 3DS the Checkout Session already
+    // confirmed for these cards instead of holding a charge Stripe's own
+    // docs say can't succeed. See https://docs.stripe.com/india-recurring-payments
+    if (latestMethod.card?.country === 'IN') {
+      return true;
+    }
+
     try {
       const paymentIntent = await stripe.paymentIntents.create({
         amount: 100,
@@ -126,7 +140,7 @@ export class StripeService extends PaymentProviderAbstract {
 
       if (paymentIntent.status !== 'requires_capture') {
         console.error('Cant charge');
-        await stripe.paymentMethods.detach(paymentMethods.data[0].id);
+        await stripe.paymentMethods.detach(latestMethod.id);
         await stripe.subscriptions.cancel(event.data.object.id as string);
         return false;
       }
@@ -135,7 +149,7 @@ export class StripeService extends PaymentProviderAbstract {
       return true;
     } catch (err) {
       try {
-        await stripe.paymentMethods.detach(paymentMethods.data[0].id);
+        await stripe.paymentMethods.detach(latestMethod.id);
         await stripe.subscriptions.cancel(event.data.object.id as string);
       } catch (err) {
         /*dont do anything*/

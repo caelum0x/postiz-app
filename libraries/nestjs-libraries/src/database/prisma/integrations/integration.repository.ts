@@ -181,6 +181,27 @@ export class IntegrationRepository {
       },
     });
 
+    // Reconnecting a channel that's already in the org: the OAuth callback
+    // created a fresh temporary record (`id`) holding the new
+    // refreshToken/tokenExpiration, but callers like saveProviderPage()
+    // only pass picture/internalId/name/token/profile in `params` - not
+    // the refresh token. Below, the temp record gets soft-deleted and
+    // `params` is applied to the pre-existing record instead, so without
+    // this, the new refresh token and expiration are discarded and the
+    // surviving record keeps whatever (possibly stale/invalid) values it
+    // had before the reconnect. Carry them over from the temp record so
+    // reconnecting doesn't quietly break token refresh an hour later.
+    if (existing && existing.id !== id && params.refreshToken === undefined) {
+      const temp = await this._integration.model.integration.findUnique({
+        where: { id },
+        select: { refreshToken: true, tokenExpiration: true },
+      });
+      if (temp?.refreshToken) {
+        params.refreshToken = temp.refreshToken;
+        params.tokenExpiration = temp.tokenExpiration;
+      }
+    }
+
     if (existing) {
       await this._posts.model.post.updateMany({
         where: {

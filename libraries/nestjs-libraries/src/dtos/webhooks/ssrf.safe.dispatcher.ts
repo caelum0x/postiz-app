@@ -61,6 +61,55 @@ const ssrfSafeAxios = axios.create({
   } as https.AgentOptions),
 });
 
+// A separate plain instance (not the module-level `axios` default) so the
+// error-redaction interceptor below is scoped to callers of
+// getSsrfSafeAxios(), not every unrelated `axios` import in the codebase.
+const plainAxios = axios.create();
+
+// Every provider authenticates these outbound calls with a header
+// (Authorization: Bearer <token>, Cookie, X-Api-Key, ...). AxiosError keeps
+// the full request config - headers included - on `error.config` and in
+// `error.toJSON()`. Any call site that forgets to catch-and-sanitize before
+// the error reaches a log, Sentry, or an activity failure record leaks that
+// credential in plaintext (see #2220, the Moltbook API key leak). Redacting
+// here, on the shared axios instances every provider gets from
+// getSsrfSafeAxios(), closes the leak generically instead of relying on each
+// provider's call sites to remember to do it themselves.
+const SENSITIVE_HEADER_NAMES = new Set([
+  'authorization',
+  'cookie',
+  'set-cookie',
+  'proxy-authorization',
+  'x-api-key',
+  'api-key',
+  'x-auth-token',
+]);
+
+function redactSensitiveHeaders(headers: unknown): void {
+  if (!headers || typeof headers !== 'object') return;
+  for (const key of Object.keys(headers as Record<string, unknown>)) {
+    if (SENSITIVE_HEADER_NAMES.has(key.toLowerCase())) {
+      (headers as Record<string, unknown>)[key] = '[redacted]';
+    }
+  }
+}
+
+// Mutates error.config.headers in place rather than cloning: nothing in this
+// codebase retries a request by reusing a failed call's error.config (every
+// retry path - this.fetch, runStreamedUpload - rebuilds its own headers from
+// scratch), so this is safe today. If that ever changes, a retry reusing
+// error.config would send the literal string '[redacted]' instead of the
+// real credential - don't build retry logic on top of a caught error's config.
+function redactAxiosError(error: unknown) {
+  if (error && typeof error === 'object') {
+    redactSensitiveHeaders((error as { config?: { headers?: unknown } }).config?.headers);
+  }
+  return Promise.reject(error);
+}
+
+ssrfSafeAxios.interceptors.response.use(undefined, redactAxiosError);
+plainAxios.interceptors.response.use(undefined, redactAxiosError);
+
 // Self-hosters legitimately connect Postiz to WordPress/Mastodon/Lemmy/Listmonk
 // instances that live on a private network (e.g. the same Docker network or VPC).
 // Setting DISABLE_SSRF_PROTECTION=true opts those deployments out of the IP
@@ -72,5 +121,7 @@ export function getSsrfSafeDispatcher(): Agent | undefined {
 }
 
 export function getSsrfSafeAxios(): AxiosInstance {
-  return process.env.DISABLE_SSRF_PROTECTION === 'true' ? axios : ssrfSafeAxios;
+  return process.env.DISABLE_SSRF_PROTECTION === 'true'
+    ? plainAxios
+    : ssrfSafeAxios;
 }

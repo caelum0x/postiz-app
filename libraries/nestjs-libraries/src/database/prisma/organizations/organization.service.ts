@@ -208,7 +208,15 @@ export class OrganizationService {
     const myLevel = myRole === 'USER' ? 0 : myRole === 'ADMIN' ? 1 : 2;
     const userLevel = userRole === 'USER' ? 0 : userRole === 'ADMIN' ? 1 : 2;
 
-    if (myLevel < userLevel) {
+    // The team settings UI only ever offers the delete action when the
+    // caller's level is strictly above the target's (teams.component.tsx:
+    // `+myLevel > +getLevel(p.role)`) - it never lets you remove a
+    // same-level peer or yourself. Enforce the same bound here, not just
+    // "below": otherwise calling this endpoint directly lets a SUPERADMIN
+    // remove another SUPERADMIN, or remove themselves - including as the
+    // organization's only SUPERADMIN, orphaning it with nobody left able
+    // to manage the team or billing.
+    if (myLevel <= userLevel) {
       throw new Error('You do not have permission to delete this user');
     }
 

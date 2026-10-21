@@ -116,7 +116,25 @@ export class ThirdPartyController {
       throw new HttpException('Invalid identifier', 400);
     }
 
-    return thirdPartyInstance?.instance?.[functionName](
+    // functionName comes straight from the URL - only call methods the
+    // provider explicitly opted in with @ExposeThirdPartyFunction, the same
+    // allowlist VideoManager enforces for its own name-dispatched functions.
+    // Without this, any authenticated org member could invoke ANY method
+    // found on the provider instance (checkConnection, sendData, or a future
+    // internal helper) just by naming it in the URL.
+    const functionToCall = thirdPartyInstance.instance?.[functionName];
+    if (
+      typeof functionToCall !== 'function' ||
+      this._thirdPartyManager.checkAvailableThirdPartyFunction(functionToCall)
+    ) {
+      throw new HttpException(
+        `Function ${functionName} not found on third-party instance`,
+        400
+      );
+    }
+
+    return functionToCall.call(
+      thirdPartyInstance.instance,
       AuthService.fixedDecryption(thirdParty.apiKey),
       data
     );

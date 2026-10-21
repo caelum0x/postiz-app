@@ -25,6 +25,40 @@ export interface ThirdPartyParams {
   installUrl?: () => string | undefined;
 }
 
+// Marks a provider method as safe to invoke by name from the generic
+// `/third-party/function/:id/:functionName` dispatch endpoint. Mirrors
+// `ExposeVideoFunction` in video.interface.ts - without this allowlist,
+// that endpoint would let any authenticated org member invoke ANY method
+// found on the provider instance (checkConnection, sendData, or any future
+// internal helper) just by naming it in the URL.
+export function ExposeThirdPartyFunction(description?: string) {
+  return function (
+    target: any,
+    propertyKey: string,
+    descriptor: PropertyDescriptor
+  ) {
+    Reflect.defineMetadata(
+      'third-party-function',
+      description || 'true',
+      descriptor.value
+    );
+  };
+}
+
+// Returns false only for methods explicitly marked with
+// @ExposeThirdPartyFunction - same allowlist shape as
+// VideoManager#checkAvailableVideoFunction. Callers must treat `true`
+// (not found, not a function, or not marked) as "reject the call". Kept as
+// a standalone function (not a class method) so it can be unit-tested
+// without pulling in ThirdPartyManager's full Nest DI chain.
+export function checkAvailableThirdPartyFunction(method: any) {
+  const thirdPartyFunction = Reflect.getMetadata(
+    'third-party-function',
+    method
+  );
+  return !thirdPartyFunction;
+}
+
 export function ThirdParty(params: ThirdPartyParams) {
   return function (target: any) {
     // Apply @Injectable decorator to the target class

@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  checkAvailableThirdPartyFunction,
   ThirdPartyAbstract,
   ThirdPartyParams,
 } from '@gitroom/nestjs-libraries/3rdparties/thirdparty.interface';
@@ -33,6 +34,12 @@ export class ThirdPartyManager {
     ).find((p: any) => p.identifier === identifier);
 
     return { ...thirdParty, instance: this._moduleRef.get(thirdParty.target) };
+  }
+
+  // See checkAvailableThirdPartyFunction in thirdparty.interface.ts for the
+  // allowlist this enforces.
+  checkAvailableThirdPartyFunction(method: any) {
+    return checkAvailableThirdPartyFunction(method);
   }
 
   deleteIntegration(org: string, id: string) {

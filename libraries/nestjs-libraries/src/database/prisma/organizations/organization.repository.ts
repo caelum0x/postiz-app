@@ -658,6 +658,16 @@ export class OrganizationRepository {
     });
   }
 
+  countSuperAdmins(orgId: string) {
+    return this._userOrg.model.userOrganization.count({
+      where: {
+        organizationId: orgId,
+        role: Role.SUPERADMIN,
+        disabled: false,
+      },
+    });
+  }
+
   async deleteTeamMember(orgId: string, userId: string) {
     return this._userOrg.model.userOrganization.delete({
       where: {

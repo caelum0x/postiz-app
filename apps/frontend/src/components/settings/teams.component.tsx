@@ -117,6 +117,7 @@ export const TeamsComponent = () => {
   const fetch = useFetch();
   const user = useUser();
   const modals = useModals();
+  const toast = useToaster();
   const t = useT();
   const myLevel = user?.role === 'USER' ? 0 : user?.role === 'ADMIN' ? 1 : 2;
   const getLevel = useCallback(
@@ -149,6 +150,40 @@ export const TeamsComponent = () => {
     revalidateOnReconnect: false,
     revalidateIfStale: false,
   });
+  const loadOrganizations = useCallback(async () => {
+    return await (await fetch('/user/organizations')).json();
+  }, []);
+  // Shares the 'organizations' SWR cache key with the organization switcher
+  // (organization.selector.tsx) instead of fetching the same list twice.
+  const { data: organizations } = useSWR('organizations', loadOrganizations, {
+    revalidateIfStale: false,
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+  });
+  const canLeave = (organizations?.length || 0) > 1;
+  const leaveOrganization = useCallback(async () => {
+    if (
+      !(await deleteDialog(
+        t(
+          'are_you_sure_leave_organization',
+          'Are you sure you want to leave this organization? You will lose access to it unless invited back.'
+        )
+      ))
+    ) {
+      return;
+    }
+    const response = await fetch('/settings/team/leave', { method: 'POST' });
+    if (!response.ok) {
+      const { message } = await response.json().catch(() => ({} as any));
+      toast.show(
+        (Array.isArray(message) ? message[0] : message) ||
+          t('could_not_leave_organization', 'Could not leave the organization'),
+        'warning'
+      );
+      return;
+    }
+    window.location.href = '/';
+  }, [t]);
   const remove = useCallback(
     (toRemove: {
         user: {
@@ -226,10 +261,15 @@ export const TeamsComponent = () => {
             </div>
           ))}
         </div>
-        <div>
+        <div className="flex gap-[12px]">
           <Button onClick={addMember}>
             {t('add_another_member', 'Add another member')}
           </Button>
+          {canLeave && (
+            <Button secondary={true} onClick={leaveOrganization}>
+              {t('leave_organization', 'Leave organization')}
+            </Button>
+          )}
         </div>
       </div>
     </div>

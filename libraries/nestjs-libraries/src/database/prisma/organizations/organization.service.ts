@@ -223,6 +223,45 @@ export class OrganizationService {
     return this._organizationRepository.deleteTeamMember(org.id, userId);
   }
 
+  // Self-service counterpart to deleteTeamMember(): a member removing
+  // themselves instead of being removed by an admin. The auth middleware
+  // always needs at least one non-disabled organization for the user to
+  // fall back to (req.org = organization[0]), and an org can't be left
+  // without a Super Admin able to manage it afterwards, so both are
+  // blocked here rather than left to 500 on the next request.
+  async leaveOrganization(user: User, org: Organization) {
+    const userOrgs = await this._organizationRepository.getOrgsByUserId(
+      user.id
+    );
+    if (userOrgs.length <= 1) {
+      throw new HttpException(
+        'You cannot leave your only organization. Delete it instead if you no longer need it.',
+        400
+      );
+    }
+
+    const findOrgToLeave = userOrgs.find((orgUser) => orgUser.id === org.id);
+    if (!findOrgToLeave) {
+      throw new HttpException('You are not part of this organization', 400);
+    }
+
+    // @ts-ignore
+    const myRole = findOrgToLeave.users[0].role;
+    if (myRole === 'SUPERADMIN') {
+      const superAdminCount = await this._organizationRepository.countSuperAdmins(
+        org.id
+      );
+      if (superAdminCount <= 1) {
+        throw new HttpException(
+          'You are the only Super Admin of this organization. Promote another member to Super Admin or delete the organization before leaving.',
+          400
+        );
+      }
+    }
+
+    return this._organizationRepository.deleteTeamMember(org.id, user.id);
+  }
+
   disableOrEnableNonSuperAdminUsers(orgId: string, disable: boolean) {
     return this._organizationRepository.disableOrEnableNonSuperAdminUsers(
       orgId,

@@ -72,6 +72,18 @@ export class SettingsController {
     return this._organizationService.deleteTeamMember(org, id);
   }
 
+  // Self-service: a member leaving an organization they're currently
+  // switched into, as opposed to an admin removing someone else via
+  // deleteTeamMember() above. Not gated behind the TEAM_MEMBERS/ADMIN
+  // policy since any member - not just admins - can leave an org.
+  @Post('/team/leave')
+  leaveOrganization(
+    @GetUserFromRequest() user: User,
+    @GetOrgFromRequest() org: Organization
+  ) {
+    return this._organizationService.leaveOrganization(user, org);
+  }
+
   @Get('/shortlink')
   async getShortlinkPreference(@GetOrgFromRequest() org: Organization) {
     return this._organizationService.getShortlinkPreference(org.id);

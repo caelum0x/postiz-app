@@ -54,23 +54,50 @@ export class AuthService {
           throw new Error('Registration is disabled');
         }
 
-        const create = await this._organizationService.createOrgAndUser(
-          body,
-          ip,
-          userAgent
-        );
+        const invite =
+          addToOrg && typeof addToOrg !== 'boolean' ? addToOrg : undefined;
 
-        const addedOrg =
-          addToOrg && typeof addToOrg !== 'boolean'
-            ? await this._organizationService.addUserToOrg(
-                create.users[0].user.id,
-                addToOrg.id,
-                addToOrg.orgId,
-                addToOrg.role
-              )
-            : false;
+        let registeredUser: User;
+        let addedOrg: boolean | Awaited<
+          ReturnType<OrganizationService['addUserToOrg']>
+        > = false;
 
-        const obj = { addedOrg, jwt: await this.jwt(create.users[0].user) };
+        if (invite) {
+          // A pending invite joins the inviting organization directly,
+          // instead of always spinning up a new one for the registering
+          // user and only afterwards trying to also join the invite (#2199).
+          registeredUser = await this._organizationService.createUser(
+            body,
+            ip,
+            userAgent
+          );
+
+          addedOrg = await this._organizationService.addUserToOrg(
+            registeredUser.id,
+            invite.id,
+            invite.orgId,
+            invite.role
+          );
+
+          // The invite could be unusable by the time registration posts
+          // (already redeemed, or the org hit its seat limit) - fall back
+          // to a standalone org so the new account isn't left with none.
+          if (!addedOrg) {
+            await this._organizationService.createOrgForExistingUser(
+              registeredUser.id,
+              body.company
+            );
+          }
+        } else {
+          const create = await this._organizationService.createOrgAndUser(
+            body,
+            ip,
+            userAgent
+          );
+          registeredUser = create.users[0].user;
+        }
+
+        const obj = { addedOrg, jwt: await this.jwt(registeredUser) };
         await this._emailService.sendEmailSync(
           body.email,
           'Activate your account',

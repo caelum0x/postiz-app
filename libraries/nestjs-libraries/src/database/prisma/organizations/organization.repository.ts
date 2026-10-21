@@ -501,6 +501,53 @@ export class OrganizationRepository {
     });
   }
 
+  // Used when registration carries a pending org invite: creates the user
+  // without also spinning up a brand-new organization for them, so a valid
+  // invite doesn't leave them stuck as SUPERADMIN of a throwaway org (#2199).
+  async createUser(
+    body: Omit<CreateOrgUserDto, 'providerToken'> & { providerId?: string },
+    hasEmail: boolean,
+    ip: string,
+    userAgent: string
+  ) {
+    return this._user.model.user.create({
+      data: {
+        activated: body.provider !== 'LOCAL' || !hasEmail,
+        email: body.email,
+        password: body.password ? AuthService.hashPassword(body.password) : '',
+        providerName: body.provider,
+        providerId: body.providerId || '',
+        timezone: 0,
+        ip,
+        agent: userAgent,
+      },
+    });
+  }
+
+  // Fallback for createUser() above: only used if the invite turned out to
+  // be unusable by the time registration posts (already redeemed, or the
+  // inviting org hit its seat limit), so the new account still lands
+  // somewhere instead of having zero organizations.
+  async createOrgForExistingUser(userId: string, company: string) {
+    return this._organization.model.organization.create({
+      data: {
+        name: company,
+        apiKey: AuthService.fixedEncryption(makeSecureId(20)),
+        allowTrial: true,
+        isTrailing: true,
+        users: {
+          create: {
+            role: Role.SUPERADMIN,
+            userId,
+          },
+        },
+      },
+      select: {
+        id: true,
+      },
+    });
+  }
+
   getOrgByCustomerId(customerId: string) {
     return this._organization.model.organization.findFirst({
       where: {

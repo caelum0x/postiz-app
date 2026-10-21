@@ -15,6 +15,7 @@ import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class MeweProvider extends SocialAbstract implements SocialProvider {
   identifier = 'mewe';
+  override requiredEnvVars = ['MEWE_APP_ID', 'MEWE_API_KEY'];
   name = 'MeWe';
   isBetweenSteps = false;
   scopes = [] as string[];

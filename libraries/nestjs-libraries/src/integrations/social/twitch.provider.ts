@@ -14,6 +14,7 @@ import { timer } from '@gitroom/helpers/utils/timer';
 export class TwitchProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 5; // Twitch limits are per user
   identifier = 'twitch';
+  override requiredEnvVars = ['TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET'];
   name = 'Twitch';
   isBetweenSteps = false;
   editor = 'normal' as const;

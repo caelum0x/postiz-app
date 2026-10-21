@@ -156,6 +156,22 @@ export abstract class SocialAbstract {
   abstract identifier: string;
   maxConcurrentJob = 1;
 
+  /**
+   * Env vars this provider needs (client id/secret, api key, etc) to be
+   * usable at all. Empty for providers that never need app-level
+   * credentials (self-hosted instance URL, wallet-based auth, ...).
+   * Checked generically by missingEnvVars() so a provider with unset
+   * credentials never gets an OAuth URL built with an empty/`undefined`
+   * client id (#2238). A provider whose "is this configured" check isn't a
+   * plain AND of fixed names (for example one that falls back to another
+   * provider's credentials) overrides missingEnvVars() directly instead.
+   */
+  requiredEnvVars: string[] = [];
+
+  missingEnvVars(): string[] {
+    return this.requiredEnvVars.filter((name) => !process.env[name]);
+  }
+
   public handleErrors(
     body: string,
     status: number

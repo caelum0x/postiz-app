@@ -26,6 +26,7 @@ export class InstagramStandaloneProvider
   implements SocialProvider
 {
   identifier = 'instagram-standalone';
+  override requiredEnvVars = ['INSTAGRAM_APP_ID', 'INSTAGRAM_APP_SECRET'];
   name = 'Instagram\n(Standalone)';
   isBetweenSteps = false;
   refreshCron = true;

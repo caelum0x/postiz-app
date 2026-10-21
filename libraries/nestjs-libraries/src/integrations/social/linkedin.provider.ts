@@ -58,6 +58,7 @@ type LinkedinPendingData = {
 )
 export class LinkedinProvider extends SocialAbstract implements SocialProvider {
   identifier = 'linkedin';
+  override requiredEnvVars = ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'];
   name = 'LinkedIn';
   oneTimeToken = true;
 

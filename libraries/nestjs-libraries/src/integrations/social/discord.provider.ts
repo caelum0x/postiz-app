@@ -14,6 +14,7 @@ import FormDataUpload from 'form-data';
 export class DiscordProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 5; // Discord has generous rate limits for webhook posting
   identifier = 'discord';
+  override requiredEnvVars = ['DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET'];
   name = 'Discord';
   isBetweenSteps = false;
   editor = 'markdown' as const;

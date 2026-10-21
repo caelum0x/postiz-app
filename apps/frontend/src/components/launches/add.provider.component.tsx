@@ -488,13 +488,14 @@ export const AddProviderComponent: FC<{
           if (response.status === 402) {
             return;
           }
-          const { url, err } = await response.json();
+          const { url, err, message } = await response.json();
           if (err) {
             toaster.show(
-              t(
-                'could_not_connect_to_platform',
-                'Could not connect to the platform'
-              ),
+              message ||
+                t(
+                  'could_not_connect_to_platform',
+                  'Could not connect to the platform'
+                ),
               'warning'
             );
             return;

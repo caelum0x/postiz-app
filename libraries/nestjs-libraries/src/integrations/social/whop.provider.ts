@@ -20,6 +20,7 @@ import { Tool } from '@gitroom/nestjs-libraries/integrations/tool.decorator';
 export class WhopProvider extends SocialAbstract implements SocialProvider {
   override maxConcurrentJob = 3; // Whop limits are per token
   identifier = 'whop';
+  override requiredEnvVars = ['WHOP_CLIENT_ID'];
   name = 'Whop';
   isBetweenSteps = false;
   scopes = ['openid', 'profile', 'email', 'forum:post:create', 'forum:read', 'company:basic:read'];

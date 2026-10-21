@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Logger,
   Param,
   Post,
   Put,
@@ -41,6 +42,8 @@ import { RefreshIntegrationService } from '@gitroom/nestjs-libraries/integration
 @ApiTags('Integrations')
 @Controller('/integrations')
 export class IntegrationsController {
+  private readonly _logger = new Logger(IntegrationsController.name);
+
   constructor(
     private _integrationManager: IntegrationManager,
     private _integrationService: IntegrationService,
@@ -247,6 +250,27 @@ export class IntegrationsController {
       throw new Error('Missing external url');
     }
 
+    // Building the auth URL with an unset client id/secret sends the user
+    // to the provider with an empty or literal "undefined" client id - the
+    // provider's error page gives no hint that a server env var is missing
+    // (#2238). Catch it generically here instead of per-provider.
+    const missingEnvVars = integrationProvider.missingEnvVars?.() ?? [];
+    if (missingEnvVars.length) {
+      this._logger.error(
+        `Cannot start ${integration} OAuth: missing env var(s) ${missingEnvVars.join(
+          ', '
+        )}`
+      );
+      return {
+        err: true,
+        message: `${integrationProvider.name} is not configured on this server: missing ${missingEnvVars.join(
+          ', '
+        )}. Ask the admin to set ${missingEnvVars.length > 1 ? 'these' : 'this'} environment variable${
+          missingEnvVars.length > 1 ? 's' : ''
+        }.`,
+      };
+    }
+
     try {
       const getExternalUrl = integrationProvider.externalUrl
         ? {
@@ -280,7 +304,17 @@ export class IntegrationsController {
       );
 
       return { url };
-    } catch (err) {
+    } catch (err: any) {
+      // Previously swallowed entirely (HTTP 200 with just { err: true }), so
+      // a provider rejecting the request (for example X's request-token call
+      // failing) left no trace anywhere in the server logs (#2238). Log only
+      // the message, never the raw error object - some provider errors carry
+      // request config/headers that aren't guaranteed to be redacted here.
+      this._logger.error(
+        `Failed to generate auth URL for ${integration}: ${
+          err?.message || err
+        }`
+      );
       return { err: true };
     }
   }

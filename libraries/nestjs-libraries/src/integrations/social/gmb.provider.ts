@@ -48,6 +48,26 @@ export class GmbProvider extends SocialAbstract implements SocialProvider {
     'https://www.googleapis.com/auth/userinfo.email',
     'https://www.googleapis.com/auth/business.manage',
   ];
+
+  // clientAndGmb() falls back to the YOUTUBE_CLIENT_ID/SECRET pair when the
+  // GMB-specific ones aren't set, so "configured" is either pair present,
+  // not a plain AND of fixed names - override instead of using
+  // requiredEnvVars (#2238).
+  override missingEnvVars(): string[] {
+    const hasGmbCreds =
+      !!process.env.GOOGLE_GMB_CLIENT_ID && !!process.env.GOOGLE_GMB_CLIENT_SECRET;
+    const hasYoutubeCreds =
+      !!process.env.YOUTUBE_CLIENT_ID && !!process.env.YOUTUBE_CLIENT_SECRET;
+
+    if (hasGmbCreds || hasYoutubeCreds) {
+      return [];
+    }
+
+    return [
+      'GOOGLE_GMB_CLIENT_ID (or YOUTUBE_CLIENT_ID)',
+      'GOOGLE_GMB_CLIENT_SECRET (or YOUTUBE_CLIENT_SECRET)',
+    ];
+  }
   editor = 'normal' as const;
   dto = GmbSettingsDto;
 

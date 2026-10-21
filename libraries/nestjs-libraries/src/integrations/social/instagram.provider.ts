@@ -30,6 +30,7 @@ export class InstagramProvider
   implements SocialProvider
 {
   identifier = 'instagram';
+  override requiredEnvVars = ['FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET'];
   name = 'Instagram\n(Facebook Business)';
   isBetweenSteps = true;
   toolTip = 'Instagram must be business and connected to a Facebook page';

@@ -180,6 +180,9 @@ export interface SocialProvider
   extends IAuthenticator,
     ISocialMediaIntegration {
   identifier: string;
+  // Env vars missing for this provider to be usable, or [] when fully
+  // configured - see SocialAbstract.missingEnvVars() (#2238).
+  missingEnvVars?(): string[];
   refreshWait?: boolean;
   convertToJPEG?: boolean;
   stripLinks?: () => boolean;

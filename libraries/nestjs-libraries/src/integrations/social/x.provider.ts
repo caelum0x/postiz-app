@@ -74,6 +74,7 @@ type XPendingData = {
 )
 export class XProvider extends SocialAbstract implements SocialProvider {
   identifier = 'x';
+  override requiredEnvVars = ['X_API_KEY', 'X_API_SECRET'];
   name = 'X';
   isBetweenSteps = false;
   scopes = [] as string[];

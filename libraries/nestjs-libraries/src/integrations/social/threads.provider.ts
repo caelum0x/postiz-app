@@ -21,6 +21,7 @@ import { hasExtension } from '@gitroom/helpers/utils/has.extension';
 
 export class ThreadsProvider extends SocialAbstract implements SocialProvider {
   identifier = 'threads';
+  override requiredEnvVars = ['THREADS_APP_ID', 'THREADS_APP_SECRET'];
   name = 'Threads';
   isBetweenSteps = false;
   scopes = [

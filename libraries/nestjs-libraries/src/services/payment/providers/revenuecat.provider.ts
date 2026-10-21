@@ -68,8 +68,20 @@ export class RevenueCatProvider extends PaymentProviderAbstract {
         .filter((p: string) => p && !p.startsWith('$RCAnonymousID:'))
     ) as string[];
 
+    // Every organization id in this event must be attempted even if an
+    // earlier one fails (transient RevenueCat API error, unrecognized
+    // product id, ...). A thrown error here would stop the loop and leave
+    // the remaining organizations - e.g. the other side of a TRANSFER event
+    // - unsynced, with billing state half-applied. Log and move on instead.
     for (const organizationId of organizations) {
-      await this.syncSubscription(organizationId);
+      try {
+        await this.syncSubscription(organizationId);
+      } catch (err) {
+        console.error(
+          `RevenueCat webhook: failed to sync subscription for org ${organizationId}`,
+          err
+        );
+      }
     }
 
     return { ok: true };

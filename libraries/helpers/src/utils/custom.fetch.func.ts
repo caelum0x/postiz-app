@@ -7,6 +7,26 @@ export interface Params {
     response: Response
   ) => Promise<boolean>;
 }
+
+// Reads a cookie by its exact name, not by substring match.
+// `document.cookie.split(';').find((p) => p.includes('auth='))` used to match
+// ANY cookie whose string contains "auth=" (e.g. a `_pin_unauth` cookie set by
+// another app on the same parent domain), which could log the user straight
+// back out. Matching requires the trimmed cookie to start with `${name}=`.
+const getCookieValue = (name: string): string | null => {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  const prefix = `${name}=`;
+  const match = document.cookie
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix));
+
+  return match ? match.slice(prefix.length) : null;
+};
+
 export const customFetch = (
   params: Params,
   auth?: string,
@@ -19,29 +39,11 @@ export const customFetch = (
         ? undefined
         : new URL(window.location.href).searchParams.get('loggedAuth');
     const newRequestObject = await params?.beforeRequest?.(url, options);
-    const authNonSecuredCookie =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('auth='))
-            ?.split('=')[1];
+    const authNonSecuredCookie = getCookieValue('auth');
 
-    const authNonSecuredOrg =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('showorg='))
-            ?.split('=')[1];
+    const authNonSecuredOrg = getCookieValue('showorg');
 
-    const authNonSecuredImpersonate =
-      typeof document === 'undefined'
-        ? null
-        : document.cookie
-            .split(';')
-            .find((p) => p.includes('impersonate='))
-            ?.split('=')[1];
+    const authNonSecuredImpersonate = getCookieValue('impersonate');
 
     const fetchRequest = await fetch(params.baseUrl + url, {
       ...(secured ? { credentials: 'include' } : {}),

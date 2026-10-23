@@ -527,19 +527,21 @@ export class PostActivity {
         postId,
         integrationId
       );
+      const requestBody = JSON.stringify(post);
       await Promise.all(
         webhooks.map(async (webhook) => {
           try {
             // webhook.url is validated at save time, but DNS can change
             // between then and now - pin resolution like every other
-            // user-influenced outbound request.
-            await fetch(webhook.url, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(post),
-              // @ts-ignore — undici option, not in lib.dom fetch types
+            // user-influenced outbound request. Delivery is signed, retried
+            // with backoff on transient failures, and logged either way.
+            await this._webhookService.sendWithRetry({
+              webhookId: webhook.id,
+              url: webhook.url,
+              secret: webhook.secret,
+              event: 'post.published',
+              postId,
+              requestBody,
               dispatcher: getSsrfSafeDispatcher(),
             });
           } catch (e) {

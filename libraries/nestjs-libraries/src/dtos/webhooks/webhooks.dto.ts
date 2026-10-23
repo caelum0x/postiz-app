@@ -1,4 +1,4 @@
-import { IsDefined, IsOptional, IsString, IsUrl } from 'class-validator';
+import { IsDefined, IsNumberString, IsOptional, IsString, IsUrl } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsSafeWebhookUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
 
@@ -38,6 +38,12 @@ export class OnlyURL {
       'URL must be a public HTTPS URL and cannot point to internal network addresses',
   })
   url: string;
+}
+
+export class DeliveriesPageDto {
+  @IsOptional()
+  @IsNumberString()
+  page?: string;
 }
 
 export class UpdateDto {

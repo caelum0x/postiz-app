@@ -704,14 +704,35 @@ model Webhooks {
   name           String
   organizationId String
   url            String
+  secret         String?
   deletedAt      DateTime?
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
   integrations   IntegrationsWebhooks[]
+  deliveries     WebhookDelivery[]
   organization   Organization           @relation(fields: [organizationId], references: [id])
 
   @@index([organizationId])
   @@index([deletedAt])
+}
+
+model WebhookDelivery {
+  id          String   @id @default(uuid())
+  webhookId   String
+  webhook     Webhooks @relation(fields: [webhookId], references: [id])
+  event       String   @default("post.published")
+  postId      String?
+  url         String
+  requestBody String
+  statusCode  Int?
+  success     Boolean  @default(false)
+  attempts    Int      @default(1)
+  error       String?
+  durationMs  Int?
+  createdAt   DateTime @default(now())
+
+  @@index([webhookId])
+  @@index([webhookId, createdAt])
 }
 
 model AutoPost {

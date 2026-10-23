@@ -16,6 +16,8 @@ import { useToaster } from '@gitroom/react/toaster/toaster';
 import clsx from 'clsx';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import { WebhookDeliveries } from '@gitroom/frontend/components/webhooks/webhook.deliveries';
+import { CopyButton } from '@gitroom/frontend/components/public-api/public.component';
 
 export const Webhooks: FC = () => {
   const fetch = useFetch();
@@ -57,6 +59,17 @@ export const Webhooks: FC = () => {
     },
     []
   );
+  const showLogs = useCallback(
+    (data: any) => () => {
+      modal.openModal({
+        title: t('delivery_log', 'Delivery log'),
+        withCloseButton: true,
+        classNames: { modal: 'w-[100%] max-w-[900px]' },
+        children: <WebhookDeliveries webhookId={data.id} name={data.name} />,
+      });
+    },
+    [t]
+  );
 
   return (
     <div className="flex flex-col">
@@ -72,10 +85,11 @@ export const Webhooks: FC = () => {
       <div className="my-[16px] mt-[16px] bg-sixth border-fifth items-center border rounded-[4px] p-[24px] flex gap-[24px]">
         <div className="flex flex-col w-full">
           {!!data?.length && (
-            <div className="grid grid-cols-[1fr,1fr,1fr,1fr] w-full gap-y-[10px]">
+            <div className="grid grid-cols-[1fr,1fr,1fr,1fr,1fr] w-full gap-y-[10px]">
               <div>{t('name', 'Name')}</div>
               <div>{t('url', 'URL')}</div>
               <div>{t('edit', 'Edit')}</div>
+              <div>{t('logs', 'Logs')}</div>
               <div>{t('delete', 'Delete')}</div>
               {data?.map((p: any) => (
                 <Fragment key={p.id}>
@@ -85,6 +99,13 @@ export const Webhooks: FC = () => {
                     <div>
                       <Button onClick={addWebhook(p)}>
                         {t('edit', 'Edit')}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-col justify-center">
+                    <div>
+                      <Button secondary onClick={showLogs(p)}>
+                        {t('logs', 'Logs')}
                       </Button>
                     </div>
                   </div>
@@ -172,19 +193,46 @@ export const AddOrEditWebhook: FC<{
     refreshWhenHidden: false,
     refreshWhenOffline: false,
   });
+  const revealSecret = useCallback(
+    (secret: string) => {
+      modal.openModal({
+        title: t('webhook_signing_secret', 'Webhook signing secret'),
+        withCloseButton: true,
+        children: (
+          <div className="flex flex-col gap-[12px]">
+            <div className="text-customColor18">
+              {t(
+                'webhook_secret_shown_once',
+                "Copy this now, it won't be shown again. Use it to verify the X-Postiz-Signature header (HMAC SHA-256 of the raw request body) on incoming requests."
+              )}
+            </div>
+            <div className="flex items-center gap-[8px]">
+              <div className="break-all font-mono text-[12px] bg-sixth p-[8px] rounded flex-1">
+                {secret}
+              </div>
+              <CopyButton text={secret} label={t('secret', 'Secret')} />
+            </div>
+          </div>
+        ),
+      });
+    },
+    [t]
+  );
   const callBack = useCallback(
     async (values: any) => {
-      await fetch('/webhooks', {
-        method: data?.id ? 'PUT' : 'POST',
-        body: JSON.stringify({
-          ...(data?.id
-            ? {
-                id: data.id,
-              }
-            : {}),
-          ...values,
-        }),
-      });
+      const result = await (
+        await fetch('/webhooks', {
+          method: data?.id ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            ...(data?.id
+              ? {
+                  id: data.id,
+                }
+              : {}),
+            ...values,
+          }),
+        })
+      ).json();
       toast.show(
         data?.id
           ? t('webhook_updated_successfully', 'Webhook updated successfully')
@@ -192,10 +240,35 @@ export const AddOrEditWebhook: FC<{
         'success'
       );
       modal.closeAll();
+      if (result?.secret) {
+        revealSecret(result.secret);
+      }
       reload();
     },
-    [data, integrations]
+    [data, integrations, revealSecret]
   );
+  const regenerateSecret = useCallback(async () => {
+    if (
+      !(await deleteDialog(
+        t(
+          'regenerate_secret_confirm',
+          'Regenerating invalidates the current signing secret - any system verifying it will need the new one. Continue?'
+        ),
+        t('yes_regenerate', 'Yes, regenerate'),
+        t('regenerate_webhook_secret', 'Regenerate webhook secret')
+      ))
+    ) {
+      return;
+    }
+    const result = await (
+      await fetch(`/webhooks/${data.id}/secret`, { method: 'POST' })
+    ).json();
+    modal.closeAll();
+    if (result?.secret) {
+      revealSecret(result.secret);
+    }
+    reload();
+  }, [data, revealSecret]);
   const sendTest = useCallback(async () => {
     const url = form.getValues('url');
     toast.show(t('webhook_sent', 'Webhook send'), 'success');
@@ -305,6 +378,16 @@ export const AddOrEditWebhook: FC<{
               >
                 {t('send_test', 'Send Test')}
               </Button>
+              {!!data?.id && (
+                <Button
+                  type="button"
+                  secondary={true}
+                  className="mt-[24px]"
+                  onClick={regenerateSecret}
+                >
+                  {t('regenerate_secret', 'Regenerate secret')}
+                </Button>
+              )}
             </div>
           </div>
         </div>

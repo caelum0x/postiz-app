@@ -46,17 +46,13 @@ export class MastodonCustomProvider extends MastodonProvider {
       client_secret,
     };
   }
-  override async generateAuthUrl(
-    refresh?: string,
-    external?: ClientInformation
-  ) {
+  override async generateAuthUrl(clientInformation?: ClientInformation) {
     const state = makeSecureId(6);
     const url = this.generateUrlDynamic(
-      external?.instanceUrl!,
+      clientInformation?.instanceUrl!,
       state,
-      external?.client_id!,
-      process.env.FRONTEND_URL!,
-      refresh
+      clientInformation?.client_id!,
+      process.env.FRONTEND_URL!
     );
 
     return {

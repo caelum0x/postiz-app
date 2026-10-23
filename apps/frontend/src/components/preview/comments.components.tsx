@@ -130,10 +130,28 @@ const CommentComposer: FC<{
   const toast = useToaster();
   const modals = useModals();
   const { recaptchaSiteKey } = useVariables();
-  const { previewId, pending, setPending, mutate } = usePreviewComments();
+  const {
+    previewId,
+    pending,
+    setPending,
+    mutate,
+    teamMembers,
+    canMention,
+  } = usePreviewComments();
   const [loading, setLoading] = useState(false);
+  const [mentions, setMentions] = useState<string[]>([]);
+  const [assignedToId, setAssignedToId] = useState('');
   const form = useForm({ values: { content: '' } });
   const anchor = parentId ? null : pending;
+  const toggleMention = useCallback(
+    (id: string) => () =>
+      setMentions((current) =>
+        current.includes(id)
+          ? current.filter((existing) => existing !== id)
+          : [...current, id]
+      ),
+    []
+  );
 
   const askForName = useCallback(
     () =>
@@ -210,6 +228,10 @@ const CommentComposer: FC<{
                 : {}),
               ...(displayName ? { displayName } : {}),
               ...(recaptchaToken ? { recaptchaToken } : {}),
+              ...(canMention && mentions.length ? { mentions } : {}),
+              ...(canMention && !parentId && assignedToId
+                ? { assignedToId }
+                : {}),
             }),
           }
         );
@@ -225,6 +247,8 @@ const CommentComposer: FC<{
         }
 
         form.reset({ content: '' });
+        setMentions([]);
+        setAssignedToId('');
         if (anchor) {
           setPending(null);
         }
@@ -234,7 +258,17 @@ const CommentComposer: FC<{
         setLoading(false);
       }
     },
-    [user?.id, recaptchaSiteKey, previewId, parentId, anchor, askForName]
+    [
+      user?.id,
+      recaptchaSiteKey,
+      previewId,
+      parentId,
+      anchor,
+      askForName,
+      canMention,
+      mentions,
+      assignedToId,
+    ]
   );
 
   return (
@@ -269,6 +303,49 @@ const CommentComposer: FC<{
           }
           maxLength={2000}
         />
+        {canMention && !!teamMembers.length && (
+          <div className="flex flex-col gap-[10px] text-[12px]">
+            {!parentId && (
+              <label className="flex items-center gap-[8px]">
+                <span className="text-textItemBlur">
+                  {t('preview_assign_to', 'Assign to')}
+                </span>
+                <select
+                  className="bg-transparent border border-newTableBorder rounded-[4px] px-[6px] py-[2px]"
+                  value={assignedToId}
+                  onChange={(event) => setAssignedToId(event.target.value)}
+                >
+                  <option value="">
+                    {t('preview_unassigned', 'Unassigned')}
+                  </option>
+                  {teamMembers.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div className="flex flex-wrap items-center gap-[10px]">
+              <span className="text-textItemBlur">
+                {t('preview_mention', 'Mention')}
+              </span>
+              {teamMembers.map((member) => (
+                <label
+                  key={member.id}
+                  className="flex items-center gap-[4px] cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={mentions.includes(member.id)}
+                    onChange={toggleMention(member.id)}
+                  />
+                  <span>{member.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-end gap-[10px] -mt-[14px]">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -307,11 +384,20 @@ const CommentComposer: FC<{
 
 const CommentBody: FC<{ comment: PreviewComment }> = ({ comment }) => {
   const t = useT();
+  const { teamMembers } = usePreviewComments();
+  const mentionedNames = comment.mentionedUserIds
+    .map((id) => teamMembers.find((member) => member.id === id)?.name)
+    .filter(Boolean);
   return (
     <div className="flex flex-col gap-[4px]">
       <div className="text-[14px] whitespace-pre-wrap break-words">
         {comment.content}
       </div>
+      {!!mentionedNames.length && (
+        <div className="text-[12px] text-btnPrimary">
+          {t('preview_cc', 'cc')}: {mentionedNames.join(', ')}
+        </div>
+      )}
       <div className="text-[12px] text-textItemBlur">
         {comment.name || t('reviewer', 'Reviewer')} ·{' '}
         {dayjs(comment.createdAt).format('MMM D, YYYY HH:mm')}
@@ -338,6 +424,7 @@ const ThreadCard: FC<{
     setActiveThread,
     hoveredThread,
     setHoveredThread,
+    teamMembers,
   } = usePreviewComments();
   const resolved = !!comment.resolvedAt;
   const anchored = comment.anchorStart !== null && comment.anchorEnd !== null;
@@ -367,6 +454,24 @@ const ThreadCard: FC<{
     mutate();
   }, [comment.id, resolved]);
 
+  const changeAssignee = useCallback(
+    async (event: { target: { value: string } }) => {
+      const response = await fetch(`/posts/comments/${comment.id}/assign`, {
+        method: 'PUT',
+        body: JSON.stringify({ assignedToId: event.target.value || undefined }),
+      });
+      if (!response.ok) {
+        toast.show(
+          t('preview_comment_failed', 'Could not post the comment'),
+          'warning'
+        );
+        return;
+      }
+      mutate();
+    },
+    [comment.id]
+  );
+
   return (
     <div
       ref={ref}
@@ -390,6 +495,28 @@ const ThreadCard: FC<{
           <div className="text-[11px] rounded-[4px] px-[6px] py-[2px] bg-btnSimple">
             {t('preview_comment_text_changed', 'Text changed')}
           </div>
+        )}
+        {canResolve && !!teamMembers.length ? (
+          <select
+            className="text-[11px] bg-transparent border border-newTableBorder rounded-[4px] px-[4px] py-[1px]"
+            value={comment.assignedToId || ''}
+            onChange={changeAssignee}
+          >
+            <option value="">{t('preview_unassigned', 'Unassigned')}</option>
+            {teamMembers.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          !!comment.assignedToName && (
+            <div className="text-[11px] rounded-[4px] px-[6px] py-[2px] bg-btnSimple">
+              {t('preview_assigned_to', 'Assigned to {{name}}', {
+                name: comment.assignedToName,
+              })}
+            </div>
+          )
         )}
       </div>
       {!!comment.anchorQuote && (

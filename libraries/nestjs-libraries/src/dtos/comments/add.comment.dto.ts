@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsInt,
   IsOptional,
@@ -48,11 +50,34 @@ export class CreatePublicCommentDto extends AddCommentDto {
   @IsOptional()
   @IsString()
   recaptchaToken?: string;
+
+  // Resolved team-member user ids picked from a mention picker - only
+  // honored when the comment is created by an authenticated team member
+  // (userId set), never from the public no-auth preview link. See
+  // PostsService.createPublicComment.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  mentions?: string[];
+
+  // Directs this root comment to one team member. Same authenticated-only
+  // restriction as mentions above.
+  @IsOptional()
+  @IsString()
+  assignedToId?: string;
 }
 
 export class ResolveCommentDto {
   @IsBoolean()
   resolved: boolean;
+}
+
+export class AssignCommentDto {
+  // Empty string/undefined clears the assignment.
+  @IsOptional()
+  @IsString()
+  assignedToId?: string;
 }
 
 export class ApprovePostDto {

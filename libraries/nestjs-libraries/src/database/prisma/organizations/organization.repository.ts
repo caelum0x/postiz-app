@@ -625,6 +625,36 @@ export class OrganizationRepository {
     });
   }
 
+  // Own select (id/name/lastName/email/role) instead of widening getTeam's
+  // shared one - used by the comment @mention/assignment picker and by the
+  // internal post-approval flow to resolve/validate target team members.
+  async getTeamMembersForMentions(orgId: string) {
+    const members = await this._userOrg.model.userOrganization.findMany({
+      where: {
+        organizationId: orgId,
+        disabled: false,
+      },
+      select: {
+        role: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return members.map((m) => ({
+      id: m.user.id,
+      name: [m.user.name, m.user.lastName].filter(Boolean).join(' ').trim() || m.user.email,
+      email: m.user.email,
+      role: m.role,
+    }));
+  }
+
   getAllUsersOrgs(orgId: string) {
     return this._organization.model.organization.findUnique({
       where: {

@@ -30,12 +30,19 @@ import {
 } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 import { PostValidationException } from '@gitroom/backend/api/routes/posts.validation.exception';
 import {
+  AssignCommentDto,
   CreatePublicCommentDto,
   ResolveCommentDto,
 } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
 import { RealIP } from 'nestjs-real-ip';
 import { BulkScheduleDto } from '@gitroom/nestjs-libraries/dtos/posts/bulk.schedule.dto';
 import { simpleTextProviders } from '@gitroom/nestjs-libraries/dtos/posts/providers-settings/all.providers.settings';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
+import { EvergreenService } from '@gitroom/nestjs-libraries/database/prisma/evergreen/evergreen.service';
+import {
+  CreateEvergreenRecycleDto,
+  UpdateEvergreenRecycleDto,
+} from '@gitroom/nestjs-libraries/dtos/posts/evergreen.recycle.dto';
 
 @ApiTags('Posts')
 @Controller('/posts')
@@ -43,7 +50,9 @@ export class PostsController {
   constructor(
     private _postsService: PostsService,
     private _agentGraphService: AgentGraphService,
-    private _shortLinkService: ShortLinkService
+    private _shortLinkService: ShortLinkService,
+    private _organizationService: OrganizationService,
+    private _evergreenService: EvergreenService
   ) {}
 
   @Get('/:id/statistics')
@@ -79,9 +88,59 @@ export class PostsController {
     return this._postsService.updateReleaseId(org.id, id, releaseId);
   }
 
+  // Evergreen content recycling (see Organization.EvergreenRecycle in the
+  // schema) - lists/creates/pauses/removes the recycle schedule for one
+  // already-published post. The actual republishing happens in the daily
+  // evergreenRecycleWorkflow batch, not from this controller.
+  @Get('/:id/evergreen')
+  async getEvergreenRecycles(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._evergreenService.listForPost(org.id, id);
+  }
+
+  @Post('/:id/evergreen')
+  async createEvergreenRecycle(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string,
+    @Body() body: CreateEvergreenRecycleDto
+  ) {
+    return this._evergreenService.createRecycle(org.id, id, body);
+  }
+
+  @Put('/evergreen/:recycleId')
+  async updateEvergreenRecycle(
+    @GetOrgFromRequest() org: Organization,
+    @Param('recycleId') recycleId: string,
+    @Body() body: UpdateEvergreenRecycleDto
+  ) {
+    return this._evergreenService.setActive(org.id, recycleId, body.active);
+  }
+
+  @Delete('/evergreen/:recycleId')
+  async deleteEvergreenRecycle(
+    @GetOrgFromRequest() org: Organization,
+    @Param('recycleId') recycleId: string
+  ) {
+    return this._evergreenService.remove(org.id, recycleId);
+  }
+
   @Post('/should-shortlink')
   async shouldShortlink(@Body() body: { messages: string[] }) {
     return { ask: this._shortLinkService.askShortLinkedin(body.messages) };
+  }
+
+  // Authenticated counterpart to PublicController#getComments - same data,
+  // plus mention/assignment identities that are only safe to reveal once we
+  // know the caller is logged in as a member of the org that owns the post
+  // (see PostsService.getComments's includeInternal gate).
+  @Get('/:id/comments')
+  async getComments(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return { comments: await this._postsService.getComments(id, org.id) };
   }
 
   @Post('/:id/comments')
@@ -101,6 +160,30 @@ export class PostsController {
     @Body() body: ResolveCommentDto
   ) {
     return this._postsService.resolveComment(org.id, commentId, body.resolved);
+  }
+
+  @Put('/comments/:commentId/assign')
+  async assignComment(
+    @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
+    @Param('commentId') commentId: string,
+    @Body() body: AssignCommentDto
+  ) {
+    return this._postsService.assignComment(
+      org.id,
+      commentId,
+      body.assignedToId,
+      user.id
+    );
+  }
+
+  // Backs the comment @mention/assignment picker - every active member of
+  // the current organization, not gated behind the admin-only
+  // SettingsController team endpoint since any member composing a comment
+  // needs to see who they can mention/assign.
+  @Get('/comments/team-members')
+  async getCommentTeamMembers(@GetOrgFromRequest() org: Organization) {
+    return this._organizationService.getTeamMembersForMentions(org.id);
   }
 
   @Get('/tags')

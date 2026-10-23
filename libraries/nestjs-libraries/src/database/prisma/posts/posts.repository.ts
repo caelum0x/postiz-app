@@ -1010,6 +1010,13 @@ export class PostsRepository {
             lastName: true,
           },
         },
+        assignedTo: {
+          select: {
+            id: true,
+            name: true,
+            lastName: true,
+          },
+        },
       },
       orderBy: {
         createdAt: 'asc',
@@ -1135,6 +1142,8 @@ export class PostsRepository {
       anchorEnd?: number;
       anchorQuote?: string;
       isApproval?: boolean;
+      mentionedUserIds?: string[];
+      assignedToId?: string;
     } = {}
   ) {
     return this._comments.model.comments.create({
@@ -1149,7 +1158,16 @@ export class PostsRepository {
         anchorEnd: extra.anchorEnd ?? null,
         anchorQuote: extra.anchorQuote ?? null,
         isApproval: extra.isApproval ?? false,
+        mentionedUserIds: extra.mentionedUserIds ?? [],
+        assignedToId: extra.assignedToId ?? null,
       },
+    });
+  }
+
+  async setCommentAssignee(orgId: string, commentId: string, assignedToId: string | null) {
+    return this._comments.model.comments.update({
+      where: { id: commentId },
+      data: { assignedToId },
     });
   }
 

@@ -38,6 +38,24 @@ export class NotificationService {
     );
   }
 
+  // In-app only, targeted at one member (mention/assignment pings) - no
+  // email, unlike inAppNotification above which is org-wide and can send
+  // one. Failures are swallowed by callers (comment creation must not fail
+  // because a notification couldn't be written).
+  notifyUser(
+    organizationId: string,
+    userId: string,
+    content: string,
+    link?: string
+  ) {
+    return this._notificationRepository.createUserNotification(
+      organizationId,
+      userId,
+      content,
+      link
+    );
+  }
+
   async inAppNotification(
     orgId: string,
     subject: string,

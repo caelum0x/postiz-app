@@ -69,6 +69,9 @@ import {
   CreatePublicCommentDto,
 } from '@gitroom/nestjs-libraries/dtos/comments/add.comment.dto';
 import { countLength } from '@gitroom/helpers/utils/count.length';
+import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/organizations/organization.service';
+import { NotificationService } from '@gitroom/nestjs-libraries/database/prisma/notifications/notification.service';
+import { Role } from '@prisma/client';
 
 type PostWithConditionals = Post & {
   integration?: Integration;
@@ -86,7 +89,9 @@ export class PostsService {
     private _shortLinkService: ShortLinkService,
     private _openaiService: OpenaiService,
     private _temporalService: TemporalService,
-    private _refreshIntegrationService: RefreshIntegrationService
+    private _refreshIntegrationService: RefreshIntegrationService,
+    private _organizationService: OrganizationService,
+    private _notificationService: NotificationService
   ) {}
 
   searchForMissingThreeHoursPosts() {
@@ -1701,11 +1706,20 @@ export class PostsService {
     return date.clone().add(num, 'minutes').format('YYYY-MM-DDTHH:mm:00');
   }
 
-  async getComments(previewId: string) {
+  // `viewerOrgId` is only ever set by the authenticated internal route
+  // (PostsController) - the fully public, no-auth preview route
+  // (PublicController) never passes it. Mentions/assignment reveal internal
+  // team member identities, so they're only included once we know the
+  // caller is logged in as a member of the org that actually owns the
+  // post; an external reviewer on the public link gets every other field
+  // unchanged but never sees who's internally mentioned/assigned.
+  async getComments(previewId: string, viewerOrgId?: string) {
     const posts = await this.getPostsRecursively(previewId, false);
     const comments = await this._postRepository.getCommentsForPosts(
       posts.map((p) => p.id)
     );
+    const includeInternal =
+      !!viewerOrgId && posts.some((p) => p.organizationId === viewerOrgId);
 
     return comments.map((comment) => ({
       id: comment.id,
@@ -1724,6 +1738,15 @@ export class PostsService {
             .join(' ')
             .trim() || null
         : comment.displayName,
+      mentionedUserIds: includeInternal ? comment.mentionedUserIds : [],
+      assignedToId: includeInternal ? comment.assignedToId : null,
+      assignedToName:
+        includeInternal && comment.assignedTo
+          ? [comment.assignedTo.name, comment.assignedTo.lastName]
+              .filter(Boolean)
+              .join(' ')
+              .trim() || null
+          : null,
     }));
   }
 
@@ -1788,7 +1811,45 @@ export class PostsService {
       }
     }
 
-    return this._postRepository.createComment(
+    // Mentions/assignment only ever come from an authenticated team member
+    // (userId set) - the public no-auth preview link can never set them,
+    // even if a crafted request body includes them (DTO validation alone
+    // isn't a trust boundary here).
+    let mentionedUserIds: string[] | undefined;
+    let assignedToId: string | null | undefined;
+    if (userId) {
+      if (body.assignedToId && body.parentId) {
+        throw new BadRequestException('Replies cannot be assigned');
+      }
+
+      if (body.mentions?.length || body.assignedToId) {
+        const teamMembers = await this._organizationService.getTeamMembersForMentions(
+          post.organizationId
+        );
+        const teamMemberIds = new Set(teamMembers.map((member) => member.id));
+
+        if (body.mentions?.length) {
+          const unknown = body.mentions.filter((id) => !teamMemberIds.has(id));
+          if (unknown.length) {
+            throw new BadRequestException(
+              'One or more mentioned users are not members of this organization'
+            );
+          }
+          mentionedUserIds = Array.from(new Set(body.mentions));
+        }
+
+        if (body.assignedToId) {
+          if (!teamMemberIds.has(body.assignedToId)) {
+            throw new BadRequestException(
+              'Assigned user is not a member of this organization'
+            );
+          }
+          assignedToId = body.assignedToId;
+        }
+      }
+    }
+
+    const createdComment = await this._postRepository.createComment(
       post.organizationId,
       userId,
       post.id,
@@ -1799,8 +1860,58 @@ export class PostsService {
         anchorStart: hasStart ? body.anchorStart : undefined,
         anchorEnd: hasStart ? body.anchorEnd : undefined,
         anchorQuote: hasStart ? body.anchorQuote : undefined,
+        mentionedUserIds,
+        assignedToId,
       }
     );
+
+    await this.notifyMentionedAndAssigned(
+      post.organizationId,
+      userId,
+      mentionedUserIds,
+      assignedToId
+    );
+
+    return createdComment;
+  }
+
+  // Best-effort in-app pings for @mentions and a new assignment on a
+  // comment - never lets a notification failure take down comment
+  // creation, same contract as the webhook/email sends elsewhere.
+  private async notifyMentionedAndAssigned(
+    organizationId: string,
+    authorUserId: string | null,
+    mentionedUserIds?: string[],
+    assignedToId?: string | null
+  ) {
+    const targets = new Set<string>();
+    for (const id of mentionedUserIds || []) {
+      if (id !== authorUserId) {
+        targets.add(id);
+      }
+    }
+
+    await Promise.all(
+      Array.from(targets).map((userId) =>
+        this._notificationService
+          .notifyUser(
+            organizationId,
+            userId,
+            'You were mentioned in a comment on a post.'
+          )
+          .catch(() => {})
+      )
+    );
+
+    if (assignedToId && assignedToId !== authorUserId) {
+      await this._notificationService
+        .notifyUser(
+          organizationId,
+          assignedToId,
+          'A comment was assigned to you on a post.'
+        )
+        .catch(() => {});
+    }
   }
 
   // Lets the client who was sent the public preview link approve a draft
@@ -1908,6 +2019,55 @@ export class PostsService {
       commentId,
       resolved ? new Date() : null
     );
+  }
+
+  // Changes (or clears, with an empty/undefined assignedToId) who a root
+  // comment is directed at. Same org/root-only restrictions as
+  // resolveComment above.
+  async assignComment(
+    orgId: string,
+    commentId: string,
+    assignedToId: string | undefined,
+    actingUserId: string
+  ) {
+    const comment = await this._postRepository.getCommentById(commentId);
+    if (!comment || comment.post.organizationId !== orgId) {
+      throw new NotFoundException('Comment not found');
+    }
+    if (comment.parentId) {
+      throw new BadRequestException('Only root comments can be assigned');
+    }
+
+    let resolvedAssignedToId: string | null = null;
+    if (assignedToId) {
+      const teamMembers = await this._organizationService.getTeamMembersForMentions(
+        orgId
+      );
+      if (!teamMembers.some((member) => member.id === assignedToId)) {
+        throw new BadRequestException(
+          'Assigned user is not a member of this organization'
+        );
+      }
+      resolvedAssignedToId = assignedToId;
+    }
+
+    const updated = await this._postRepository.setCommentAssignee(
+      orgId,
+      commentId,
+      resolvedAssignedToId
+    );
+
+    if (resolvedAssignedToId && resolvedAssignedToId !== actingUserId) {
+      await this._notificationService
+        .notifyUser(
+          orgId,
+          resolvedAssignedToId,
+          'A comment was assigned to you on a post.'
+        )
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   // A comment anchored to a span of text keeps its quote but loses the

@@ -108,6 +108,10 @@ export class OrganizationService {
     return this._organizationRepository.getTeam(orgId);
   }
 
+  getTeamMembersForMentions(orgId: string) {
+    return this._organizationRepository.getTeamMembersForMentions(orgId);
+  }
+
   async setStreak(organizationId: string, type: 'start' | 'end') {
     return this._organizationRepository.setStreak(organizationId, type);
   }

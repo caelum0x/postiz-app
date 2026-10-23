@@ -28,6 +28,7 @@ export class NotificationsRepository {
       total: await this._notifications.model.notifications.count({
         where: {
           organizationId,
+          OR: [{ userId: null }, { userId }],
           createdAt: {
             gt: lastReadNotifications!,
           },
@@ -41,6 +42,23 @@ export class NotificationsRepository {
       data: {
         organizationId,
         content,
+      },
+    });
+  }
+
+  // Targets one member instead of the whole org - see Notifications.userId.
+  async createUserNotification(
+    organizationId: string,
+    userId: string,
+    content: string,
+    link?: string
+  ) {
+    await this._notifications.model.notifications.create({
+      data: {
+        organizationId,
+        userId,
+        content,
+        link,
       },
     });
   }
@@ -115,6 +133,7 @@ export class NotificationsRepository {
         take: 10,
         where: {
           organizationId,
+          OR: [{ userId: null }, { userId }],
         },
         select: {
           createdAt: true,

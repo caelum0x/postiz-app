@@ -13,6 +13,14 @@ export class MastodonCustomProvider extends MastodonProvider {
   override identifier = 'mastodon-custom';
   override name = 'M. Instance';
   override maxConcurrentJob = 5; // Custom Mastodon instances typically have generous limits
+  // Unlike the default MastodonProvider, this one registers its own OAuth
+  // app per instance via externalUrl() below - it never reads
+  // MASTODON_CLIENT_ID/SECRET, so it must not inherit that requirement
+  // (would otherwise block every self-hosted instance with "not configured
+  // on this server" even though no global app is needed).
+  override requiredEnvVars: string[] = [];
+  toolTip =
+    'Connect a self-hosted or non-mastodon.social instance by its URL (e.g. https://fosstodon.org)';
   editor = 'normal' as const;
 
   async externalUrl(url: string) {

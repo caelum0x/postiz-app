@@ -137,6 +137,7 @@ const details = object().shape({
   name: string().required(),
   url: string().url().required(),
   integrations: array(),
+  events: array(),
 });
 const getWebhookOptions = (t: (key: string, fallback: string) => string) => [
   {
@@ -146,6 +147,16 @@ const getWebhookOptions = (t: (key: string, fallback: string) => string) => [
   {
     label: t('specific_integrations', 'Specific integrations'),
     value: 'specific',
+  },
+];
+const getWebhookEventOptions = (t: (key: string, fallback: string) => string) => [
+  {
+    value: 'post.published',
+    label: t('event_post_published', 'A post is published successfully'),
+  },
+  {
+    value: 'post.failed',
+    label: t('event_post_failed', 'A post fails to publish'),
   },
 ];
 export const AddOrEditWebhook: FC<{
@@ -161,15 +172,30 @@ export const AddOrEditWebhook: FC<{
   );
   const modal = useModals();
   const toast = useToaster();
+  const eventOptions = getWebhookEventOptions(t);
   const form = useForm({
     resolver: yupResolver(details),
     values: {
       name: data?.name || '',
       url: data?.url || '',
       integrations: data?.integrations?.map((p: any) => p.integration) || [],
+      events: data?.events || [],
     },
   });
   const integrations = form.watch('integrations');
+  const events = form.watch('events') as string[];
+  const toggleEvent = useCallback(
+    (value: string) => () => {
+      const current: string[] = form.getValues('events') || [];
+      form.setValue(
+        'events',
+        current.includes(value)
+          ? current.filter((e) => e !== value)
+          : [...current, value]
+      );
+    },
+    []
+  );
   const integration = useCallback(async () => {
     return (await fetch('/integrations/list')).json();
   }, []);
@@ -353,6 +379,32 @@ export const AddOrEditWebhook: FC<{
                 isMain={true}
               />
             )}
+            <div className="mt-[16px]">
+              <div className="mb-[8px]">
+                {t('events', 'Events')}
+              </div>
+              <div className="text-customColor18 text-[12px] mb-[8px]">
+                {t(
+                  'webhook_events_hint',
+                  'Leave everything unchecked to receive every event.'
+                )}
+              </div>
+              <div className="flex flex-col gap-[6px]">
+                {eventOptions.map((option) => (
+                  <label
+                    key={option.value}
+                    className="flex items-center gap-[8px] cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={(events || []).includes(option.value)}
+                      onChange={toggleEvent(option.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
             <div className="flex gap-[10px]">
               <Button
                 type="submit"

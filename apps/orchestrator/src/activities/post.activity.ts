@@ -492,7 +492,49 @@ export class PostActivity {
 
   @ActivityMethod()
   async changeState(id: string, state: State, err?: any, body?: any) {
-    await this._postService.changeState(id, state, err, body);
+    const updated = await this._postService.changeState(id, state, err, body);
+
+    // Webhooks are best-effort and must never affect the publish outcome -
+    // same contract as sendWebhooks below, just for the failure path (there
+    // is no separate "did it fail" call site to hang this off elsewhere).
+    if (state === State.ERROR && updated?.organizationId && updated?.integrationId) {
+      try {
+        const webhooks = (
+          await this._webhookService.getWebhooks(updated.organizationId)
+        ).filter((f) => {
+          const inScope =
+            f.integrations.length === 0 ||
+            f.integrations.some((i) => i.integration.id === updated.integrationId);
+          const subscribed = f.events.length === 0 || f.events.includes('post.failed');
+          return inScope && subscribed;
+        });
+
+        if (webhooks.length) {
+          const post = await this._postService.getPostByForWebhookId(
+            id,
+            updated.integrationId
+          );
+          const requestBody = JSON.stringify(post);
+          await Promise.all(
+            webhooks.map((webhook) =>
+              this._webhookService
+                .sendWithRetry({
+                  webhookId: webhook.id,
+                  url: webhook.url,
+                  secret: webhook.secret,
+                  event: 'post.failed',
+                  postId: id,
+                  requestBody,
+                  dispatcher: getSsrfSafeDispatcher(),
+                })
+                .catch(() => {})
+            )
+          );
+        }
+      } catch (e) {
+        /**empty**/
+      }
+    }
   }
 
   @ActivityMethod()
@@ -512,10 +554,12 @@ export class PostActivity {
     try {
       const webhooks = (await this._webhookService.getWebhooks(orgId)).filter(
         (f) => {
-          return (
+          const inScope =
             f.integrations.length === 0 ||
-            f.integrations.some((i) => i.integration.id === integrationId)
-          );
+            f.integrations.some((i) => i.integration.id === integrationId);
+          const subscribed =
+            f.events.length === 0 || f.events.includes('post.published');
+          return inScope && subscribed;
         }
       );
 

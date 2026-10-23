@@ -1,6 +1,20 @@
-import { IsDefined, IsNumberString, IsOptional, IsString, IsUrl } from 'class-validator';
+import {
+  IsArray,
+  IsDefined,
+  IsIn,
+  IsNumberString,
+  IsOptional,
+  IsString,
+  IsUrl,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsSafeWebhookUrl } from '@gitroom/nestjs-libraries/dtos/webhooks/webhook.url.validator';
+
+// Every event a webhook can subscribe to. A webhook with an empty `events`
+// array (the default - every webhook created before this list existed)
+// still gets everything, see WebhooksService / sendWithRetry callers.
+export const WEBHOOK_EVENT_TYPES = ['post.published', 'post.failed'] as const;
+export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 
 export class WebhooksIntegrationDto {
   @IsString()
@@ -27,6 +41,12 @@ export class WebhooksDto {
   @Type(() => WebhooksIntegrationDto)
   @IsDefined()
   integrations: WebhooksIntegrationDto[];
+
+  // Empty/omitted = every event (backward compatible default).
+  @IsOptional()
+  @IsArray()
+  @IsIn(WEBHOOK_EVENT_TYPES, { each: true })
+  events?: WebhookEventType[];
 }
 
 export class OnlyURL {
@@ -67,4 +87,9 @@ export class UpdateDto {
   @Type(() => WebhooksIntegrationDto)
   @IsDefined()
   integrations: WebhooksIntegrationDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsIn(WEBHOOK_EVENT_TYPES, { each: true })
+  events?: WebhookEventType[];
 }

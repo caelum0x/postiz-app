@@ -33,6 +33,7 @@ export class WebhooksRepository {
         name: true,
         url: true,
         secret: true,
+        events: true,
         createdAt: true,
         updatedAt: true,
         integrations: {
@@ -81,11 +82,13 @@ export class WebhooksRepository {
         organizationId: orgId,
         url: body.url,
         name: body.name,
+        events: body.events || [],
         secret: randomBytes(32).toString('hex'),
       },
       update: {
         url: body.url,
         name: body.name,
+        events: body.events || [],
       },
     });
 

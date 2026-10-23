@@ -26,6 +26,12 @@ import { PostsService } from '@gitroom/nestjs-libraries/database/prisma/posts/po
 import { FileInterceptor } from '@nestjs/platform-express';
 import { MediaService } from '@gitroom/nestjs-libraries/database/prisma/media/media.service';
 import { GetPostsDto } from '@gitroom/nestjs-libraries/dtos/posts/get.posts.dto';
+import {
+  BulkCreatePostsDto,
+  BulkCreateResult,
+  BulkDeleteResult,
+  BulkPostIdsDto,
+} from '@gitroom/nestjs-libraries/dtos/posts/bulk.posts.dto';
 import { ChangePostStatusDto } from '@gitroom/nestjs-libraries/dtos/posts/change.post.status.dto';
 import { UpdatePostSettingsDto } from '@gitroom/nestjs-libraries/dtos/posts/update.post.settings.dto';
 import {
@@ -137,6 +143,15 @@ export class PublicIntegrationsController {
     @Body() rawBody: any
   ) {
     Sentry.metrics.count('public_api-request', 1);
+    return this.createOnePost(org, rawBody);
+  }
+
+  // Shared by the single POST /posts above and the bulk endpoint below, so
+  // both go through the exact same validation/creation pipeline and never
+  // drift. Throws PostValidationException / HttpException on a bad single
+  // item - callers decide whether that aborts the whole request (single) or
+  // is caught per-item (bulk).
+  private async createOnePost(org: Organization, rawBody: any) {
     const body = await this._postsService.mapTypeToPost(
       {
         ...rawBody,
@@ -215,6 +230,86 @@ export class PublicIntegrationsController {
       : 'API';
 
     return this._postsService.createPost(org.id, body, creationMethod);
+  }
+
+  // Creates up to MAX_BULK_CREATE posts in one call. Each entry is the exact
+  // same body shape as POST /posts; a bad entry never aborts the batch -
+  // same "schedule what's valid, report the rest" spirit as the dashboard's
+  // CSV bulk-schedule (see PostsService.bulkSchedule).
+  @Post('/posts/bulk')
+  @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
+  async createPostsBulk(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: BulkCreatePostsDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const results: BulkCreateResult[] = [];
+
+    for (let index = 0; index < body.posts.length; index++) {
+      try {
+        const created = await this.createOnePost(org, body.posts[index]);
+        results.push({
+          index,
+          success: !!created?.length,
+          postId: created?.[0]?.postId,
+          ...(created?.length
+            ? {}
+            : { error: 'Could not create this post' }),
+        });
+      } catch (err) {
+        results.push({
+          index,
+          success: false,
+          error:
+            err instanceof HttpException
+              ? JSON.stringify(err.getResponse())
+              : err instanceof Error
+              ? err.message
+              : 'Could not create this post',
+        });
+      }
+    }
+
+    return { results };
+  }
+
+  // Deletes up to MAX_BULK_IDS posts (by id, same resolution as
+  // DELETE /posts/:id - each id's whole group is removed) in one call. A
+  // missing/foreign id never aborts the batch.
+  @Delete('/posts/bulk')
+  async deletePostsBulk(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: BulkPostIdsDto
+  ) {
+    Sentry.metrics.count('public_api-request', 1);
+    const results: BulkDeleteResult[] = [];
+
+    for (const id of body.ids) {
+      try {
+        const getPostById = await this._postsService.getPost(org.id, id);
+        if (!getPostById) {
+          results.push({ id, success: false, error: 'Post not found' });
+          continue;
+        }
+        const deleted = await this._postsService.deletePost(
+          org.id,
+          getPostById.group
+        );
+        results.push({
+          id,
+          success: !deleted?.error,
+          ...(deleted?.error ? { error: 'Could not delete this post' } : {}),
+        });
+      } catch (err) {
+        results.push({
+          id,
+          success: false,
+          error: err instanceof Error ? err.message : 'Could not delete this post',
+        });
+      }
+    }
+
+    return { results };
   }
 
   @Delete('/posts/:id')

@@ -21,6 +21,12 @@ model Organization {
   allowTrial              Boolean                  @default(false)
   isTrailing              Boolean                  @default(false)
   shortlink               ShortLinkPreference      @default(ASK)
+  // When true, a USER-level team member's posts are held as a draft
+  // (Post.pendingApproval) instead of going straight to QUEUE - an
+  // ADMIN/SUPERADMIN must approve them first. Additive, defaults false so
+  // every existing organization keeps today's behavior unchanged.
+  requireApprovalForQueue Boolean                  @default(false)
+  evergreenRecycles       EvergreenRecycle[]
   autoPost                AutoPost[]
   Comments                Comments[]
   credits                 Credits[]
@@ -118,6 +124,8 @@ model User {
   sendFailureEmails     Boolean              @default(true)
   sendStreakEmails      Boolean              @default(true)
   oauthAuthorizations   OAuthAuthorization[]
+  assignedComments      Comments[]           @relation("CommentAssignee")
+  notifications         Notifications[]
 
   @@unique([email, providerName])
   @@index([lastReadNotifications])
@@ -442,12 +450,21 @@ model Comments {
   // public preview link, so the client/calendar can show an "Approved" trail
   // without a separate table. Additive, defaults false for all existing rows.
   isApproval     Boolean      @default(false)
+  // Resolved user ids picked from the org's team list by the comment author
+  // (not parsed from free text), so a mention always resolves to a real
+  // member. Additive, defaults to [] for every existing row.
+  mentionedUserIds String[]   @default([])
+  // Directs a root comment to one team member for action. Only ever set on
+  // a root comment (same restriction as resolvedAt) by an authenticated
+  // team member - the public preview page cannot assign.
+  assignedToId   String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
   post           Post         @relation(fields: [postId], references: [id])
   user           User?        @relation(fields: [userId], references: [id])
+  assignedTo     User?        @relation("CommentAssignee", fields: [assignedToId], references: [id])
   parent         Comments?    @relation("CommentReplies", fields: [parentId], references: [id])
   replies        Comments[]   @relation("CommentReplies")
 
@@ -458,6 +475,7 @@ model Comments {
   @@index([parentId])
   @@index([resolvedAt])
   @@index([deletedAt])
+  @@index([assignedToId])
 }
 
 model Post {
@@ -484,6 +502,12 @@ model Post {
   lastMessageId              String?
   intervalInDays             Int?
   error                      String?
+  // Set on a DRAFT created by a USER-level member while the org has
+  // requireApprovalForQueue on (see Organization.requireApprovalForQueue).
+  // Cleared the moment an ADMIN/SUPERADMIN approves (-> QUEUE) or rejects
+  // (stays DRAFT, cleared so it reads as a normal draft again). Additive,
+  // defaults false for every existing row.
+  pendingApproval            Boolean                   @default(false)
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   deletedAt                  DateTime?
@@ -499,6 +523,7 @@ model Post {
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
   tags                       TagsPosts[]
   postEngagementSnapshot     PostEngagementSnapshot?
+  evergreenRecycles          EvergreenRecycle[]
 
   @@index([group])
   @@index([batchId])
@@ -516,6 +541,7 @@ model Post {
   @@index([updatedAt])
   @@index([releaseURL])
   @@index([integrationId])
+  @@index([pendingApproval])
 }
 
 // One row per Post, captured at most once (postId is unique, upserted in
@@ -557,14 +583,20 @@ model Notifications {
   organizationId String
   content        String
   link           String?
+  // Targets one member (a mention/assignment/approval ping) instead of the
+  // whole org. Null keeps today's behavior (visible to every member).
+  // Additive - every existing row is null and stays org-wide.
+  userId         String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
   organization   Organization @relation(fields: [organizationId], references: [id])
+  user           User?        @relation(fields: [userId], references: [id])
 
   @@index([createdAt])
   @@index([organizationId])
   @@index([deletedAt])
+  @@index([userId])
 }
 
 model MessagesGroup {
@@ -705,6 +737,10 @@ model Webhooks {
   organizationId String
   url            String
   secret         String?
+  // Event types this webhook wants delivered - see WEBHOOK_EVENT_TYPES.
+  // Empty means "all events", so every existing webhook keeps firing on
+  // every event it already fired on (post.published) without a migration.
+  events         String[]               @default([])
   deletedAt      DateTime?
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
@@ -753,6 +789,35 @@ model AutoPost {
   updatedAt       DateTime     @updatedAt
   organization    Organization @relation(fields: [organizationId], references: [id])
 
+  @@index([deletedAt])
+}
+
+// Content recycling / evergreen queue: periodically re-publishes a
+// still-good post as a brand-new Post (own id/group, own Comments thread),
+// so republishing never touches the original's history or stats. Picked up
+// by the bounded daily evergreenRecycleWorkflow batch - see
+// EvergreenService.getDue.
+model EvergreenRecycle {
+  id             String       @id @default(uuid())
+  organizationId String
+  postId         String
+  active         Boolean      @default(true)
+  intervalDays   Int
+  // Caps total republishes so an evergreen entry doesn't run forever by
+  // accident; null means unlimited.
+  maxRecycles    Int?
+  totalRecycles  Int          @default(0)
+  lastRecycledAt DateTime?
+  nextRecycleAt  DateTime
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  post           Post         @relation(fields: [postId], references: [id])
+
+  @@index([organizationId])
+  @@index([postId])
+  @@index([active, nextRecycleAt])
   @@index([deletedAt])
 }
 
@@ -1880,6 +1945,7 @@ enum CreationMethod {
   AUTOPOST
   CLI
   BULK_CSV
+  RECYCLE
 }
 
 enum ShortLinkPreference {

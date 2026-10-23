@@ -15,6 +15,7 @@ export * from './autopost.workflow';
 export * from './digest.email.workflow';
 export * from './missing.post.workflow';
 export * from './best.time.to.post.workflow';
+export * from './evergreen.recycle.workflow';
 export * from './send.email.workflow';
 export * from './refresh.token.workflow';
 export * from './streak.workflow';

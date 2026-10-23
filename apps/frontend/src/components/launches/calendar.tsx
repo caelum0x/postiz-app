@@ -47,6 +47,7 @@ import SafeImage from '@gitroom/react/helpers/safe.image';
 import { extend } from 'dayjs';
 import { isUSCitizen } from './helpers/isuscitizen.utils';
 import { StatisticsModal } from '@gitroom/frontend/components/launches/statistics';
+import { EvergreenModal } from '@gitroom/frontend/components/launches/evergreen.modal';
 import { MissingReleaseModal } from '@gitroom/frontend/components/launches/missing-release.modal';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
 import i18next from 'i18next';
@@ -312,6 +313,22 @@ const usePostActions = (onMutate?: () => void) => {
     [modal, t]
   );
 
+  const openEvergreen = useCallback(
+    (id: string) => () => {
+      modal.openModal({
+        title: t('evergreen_recycling', 'Evergreen Recycling'),
+        closeOnClickOutside: true,
+        closeOnEscape: true,
+        withCloseButton: true,
+        classNames: {
+          modal: 'w-[100%] max-w-[600px]',
+        },
+        children: <EvergreenModal postId={id} />,
+      });
+    },
+    [modal, t]
+  );
+
   const openMissingRelease = useCallback(
     (id: string) => () => {
       modal.openModal({
@@ -390,7 +407,7 @@ const usePostActions = (onMutate?: () => void) => {
     [fetch, toaster, t]
   );
 
-  return { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease, openPost };
+  return { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost };
 };
 
 // One day view slot. Memoized, so the now line's minute tick doesn't re-render the slots
@@ -684,7 +701,7 @@ export const ListView = () => {
       : t('no_posts', 'No posts');
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease, openPost } = usePostActions();
+  const { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost } = usePostActions();
 
   // Group posts by date
   const groupedPosts = useMemo(() => {
@@ -732,6 +749,7 @@ export const ListView = () => {
                   date={newDayjs(post.publishDate)}
                   state={post.state}
                   statistics={openStatistics(post.id)}
+                  evergreen={openEvergreen(post.id)}
                   missingRelease={openMissingRelease(post.id)}
                   openPost={openPost(post)}
                   editPost={editPost(post, false)}
@@ -790,7 +808,7 @@ export const CalendarColumn: FC<{
   const fetch = useFetch();
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openMissingRelease, openPost } = usePostActions();
+  const { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost } = usePostActions();
   const postList = useMemo(() => {
     return posts.filter((post) => {
       const pList = dayjs.utc(post.publishDate).local();
@@ -1073,6 +1091,7 @@ export const CalendarColumn: FC<{
                   date={getDate}
                   state={post.state}
                   statistics={openStatistics(post.id)}
+                  evergreen={openEvergreen(post.id)}
                   missingRelease={openMissingRelease(post.id)}
                   openPost={openPost(post)}
                   editPost={editPost(post, false)}
@@ -1199,6 +1218,7 @@ const CalendarItem: FC<{
   copyDebugJson?: () => void;
   deletePost: () => void;
   statistics: () => void;
+  evergreen?: () => void;
   missingRelease?: () => void;
   openPost: () => void;
   integrations: Integrations[];
@@ -1216,6 +1236,7 @@ const CalendarItem: FC<{
   const {
     editPost,
     statistics,
+    evergreen,
     duplicatePost,
     copyDebugJson,
     post,
@@ -1361,6 +1382,17 @@ const CalendarItem: FC<{
           </div>
         ) : (
           <></>
+        )}{' '}
+        {state === 'PUBLISHED' && evergreen && (
+          <div
+            className={clsx(
+              'hidden group-hover:block hover:underline cursor-pointer',
+              post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
+            )}
+            onClick={evergreen}
+          >
+            <Recycle />
+          </div>
         )}{' '}
         <div
           className={clsx(
@@ -1579,6 +1611,30 @@ export const Statistics = () => {
         d="M28 25H27V5C27 4.73478 26.8946 4.48043 26.7071 4.29289C26.5196 4.10536 26.2652 4 26 4H19C18.7348 4 18.4804 4.10536 18.2929 4.29289C18.1054 4.48043 18 4.73478 18 5V10H12C11.7348 10 11.4804 10.1054 11.2929 10.2929C11.1054 10.4804 11 10.7348 11 11V16H6C5.73478 16 5.48043 16.1054 5.29289 16.2929C5.10536 16.4804 5 16.7348 5 17V25H4C3.73478 25 3.48043 25.1054 3.29289 25.2929C3.10536 25.4804 3 25.7348 3 26C3 26.2652 3.10536 26.5196 3.29289 26.7071C3.48043 26.8946 3.73478 27 4 27H28C28.2652 27 28.5196 26.8946 28.7071 26.7071C28.8946 26.5196 29 26.2652 29 26C29 25.7348 28.8946 25.4804 28.7071 25.2929C28.5196 25.1054 28.2652 25 28 25ZM20 6H25V25H20V6ZM13 12H18V25H13V12ZM7 18H11V25H7V18Z"
         fill="currentColor"
       />
+    </svg>
+  );
+};
+
+export const Recycle = () => {
+  const t = useT();
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      data-tooltip-id="tooltip"
+      data-tooltip-content={t('evergreen_recycling', 'Evergreen Recycling')}
+    >
+      <path d="M17 2.1 21 6l-4 3.9" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="M7 21.9 3 18l4-3.9" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
     </svg>
   );
 };

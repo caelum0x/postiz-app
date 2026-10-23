@@ -52,6 +52,8 @@ import { AdminStatsRepository } from '@gitroom/nestjs-libraries/database/prisma/
 import { AdminStatsService } from '@gitroom/nestjs-libraries/database/prisma/admin-stats/admin-stats.service';
 import { PostEngagementRepository } from '@gitroom/nestjs-libraries/database/prisma/post-engagement/post-engagement.repository';
 import { PostEngagementService } from '@gitroom/nestjs-libraries/database/prisma/post-engagement/post-engagement.service';
+import { EvergreenRepository } from '@gitroom/nestjs-libraries/database/prisma/evergreen/evergreen.repository';
+import { EvergreenService } from '@gitroom/nestjs-libraries/database/prisma/evergreen/evergreen.service';
 
 @Global()
 @Module({
@@ -113,6 +115,8 @@ import { PostEngagementService } from '@gitroom/nestjs-libraries/database/prisma
     AdminStatsService,
     PostEngagementRepository,
     PostEngagementService,
+    EvergreenRepository,
+    EvergreenService,
   ],
   get exports() {
     return this.providers;

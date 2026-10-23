@@ -407,7 +407,80 @@ const usePostActions = (onMutate?: () => void) => {
     [fetch, toaster, t]
   );
 
-  return { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost };
+  // Admin-side half of the approval gate (see Organization.requireApprovalForQueue):
+  // approving sends the post through the real "schedule" path (starts the
+  // publish workflow), rejecting just clears the pending flag and leaves it
+  // a normal, still-editable draft. Both actions are idempotent against a
+  // 404 - the toast surfaces it as a fast "someone else already handled it"
+  // rather than a crash.
+  const approvePendingPost = useCallback(
+    (post: any) => async () => {
+      const response = await fetch(`/posts/${post.id}/approve-queue`, {
+        method: 'PUT',
+      });
+      if (!response.ok) {
+        toaster.show(
+          t(
+            'could_not_approve_post',
+            'Could not approve this post - it may have already been handled'
+          ),
+          'warning'
+        );
+        mutate();
+        return;
+      }
+      toaster.show(t('post_approved', 'Post approved and queued'), 'success');
+      mutate();
+    },
+    [toaster, t, fetch, mutate]
+  );
+
+  const rejectPendingPost = useCallback(
+    (post: any) => async () => {
+      if (
+        !(await deleteDialog(
+          t(
+            'are_you_sure_reject_post',
+            'Reject this post? It will stay as a draft for its author to edit.'
+          ),
+          t('yes_reject_it', 'Yes, reject it'),
+          undefined,
+          t('no_keep_it_pending', 'No, keep it pending')
+        ))
+      ) {
+        return;
+      }
+      const response = await fetch(`/posts/${post.id}/reject-queue`, {
+        method: 'PUT',
+      });
+      if (!response.ok) {
+        toaster.show(
+          t(
+            'could_not_reject_post',
+            'Could not reject this post - it may have already been handled'
+          ),
+          'warning'
+        );
+        mutate();
+        return;
+      }
+      toaster.show(t('post_rejected', 'Post rejected'), 'success');
+      mutate();
+    },
+    [toaster, t, fetch, mutate]
+  );
+
+  return {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openEvergreen,
+    openMissingRelease,
+    openPost,
+    approvePendingPost,
+    rejectPendingPost,
+  };
 };
 
 // One day view slot. Memoized, so the now line's minute tick doesn't re-render the slots
@@ -701,7 +774,17 @@ export const ListView = () => {
       : t('no_posts', 'No posts');
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost } = usePostActions();
+  const {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openEvergreen,
+    openMissingRelease,
+    openPost,
+    approvePendingPost,
+    rejectPendingPost,
+  } = usePostActions();
 
   // Group posts by date
   const groupedPosts = useMemo(() => {
@@ -758,6 +841,8 @@ export const ListView = () => {
                   post={post}
                   integrations={integrations}
                   deletePost={deletePost(post)}
+                  approvePost={approvePendingPost(post)}
+                  rejectPost={rejectPendingPost(post)}
                   showTime={true}
                 />
               ))}
@@ -808,7 +893,17 @@ export const CalendarColumn: FC<{
   const fetch = useFetch();
 
   // Use shared post actions hook
-  const { editPost, deletePost, copyDebugJson, openStatistics, openEvergreen, openMissingRelease, openPost } = usePostActions();
+  const {
+    editPost,
+    deletePost,
+    copyDebugJson,
+    openStatistics,
+    openEvergreen,
+    openMissingRelease,
+    openPost,
+    approvePendingPost,
+    rejectPendingPost,
+  } = usePostActions();
   const postList = useMemo(() => {
     return posts.filter((post) => {
       const pList = dayjs.utc(post.publishDate).local();
@@ -1100,6 +1195,8 @@ export const CalendarColumn: FC<{
                   post={post}
                   integrations={integrations}
                   deletePost={deletePost(post)}
+                  approvePost={approvePendingPost(post)}
+                  rejectPost={rejectPendingPost(post)}
                 />
               </div>
             </div>
@@ -1221,6 +1318,8 @@ const CalendarItem: FC<{
   evergreen?: () => void;
   missingRelease?: () => void;
   openPost: () => void;
+  approvePost?: () => void;
+  rejectPost?: () => void;
   integrations: Integrations[];
   state: State;
   display: 'day' | 'week' | 'month';
@@ -1248,6 +1347,8 @@ const CalendarItem: FC<{
     showTime,
     missingRelease,
     openPost,
+    approvePost,
+    rejectPost,
   } = props;
   const { disableXAnalytics } = useVariables();
   const user = useUser();
@@ -1255,6 +1356,18 @@ const CalendarItem: FC<{
     user?.impersonate &&
     post.creationMethod &&
     post.creationMethod !== 'UNKNOWN';
+  // Only an ADMIN/SUPERADMIN can act on another member's pendingApproval
+  // draft (see Organization.requireApprovalForQueue) - a USER-level member
+  // sees their own submission in the calendar same as any other draft, just
+  // without these two actions.
+  const canModerateApproval =
+    user?.role === 'ADMIN' || user?.role === 'SUPERADMIN';
+  const showApprovalActions =
+    state === 'DRAFT' &&
+    (post as any).pendingApproval &&
+    canModerateApproval &&
+    approvePost &&
+    rejectPost;
   const preview = useCallback(() => {
     window.open(`/p/` + post.id + '?share=true', '_blank');
   }, [post]);
@@ -1307,6 +1420,34 @@ const CalendarItem: FC<{
           )}
         >
           ✓
+        </div>
+      )}
+      {state === 'DRAFT' && (post as any).pendingApproval && (
+        <div
+          className={clsx(
+            'absolute -top-[6px] -start-[6px] z-20 w-[18px] h-[18px] rounded-full bg-yellow-500 flex items-center justify-center text-white',
+            display === 'month' && 'mobile:hidden'
+          )}
+          data-tooltip-id="tooltip"
+          data-tooltip-content={t(
+            'pending_approval_tooltip',
+            'Waiting for an admin to approve this post'
+          )}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
+          </svg>
         </div>
       )}
       {showCreationMethodBadge && (
@@ -1394,6 +1535,28 @@ const CalendarItem: FC<{
             <Recycle />
           </div>
         )}{' '}
+        {showApprovalActions && (
+          <>
+            <div
+              className={clsx(
+                'hidden group-hover:block hover:underline cursor-pointer',
+                post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
+              )}
+              onClick={approvePost}
+            >
+              <ApprovePost />
+            </div>{' '}
+            <div
+              className={clsx(
+                'hidden group-hover:block hover:underline cursor-pointer text-red-500',
+                post?.tags?.[0]?.tag?.color && 'text-shadow-tags'
+              )}
+              onClick={rejectPost}
+            >
+              <RejectPost />
+            </div>
+          </>
+        )}{' '}
         <div
           className={clsx(
             'hidden group-hover:block hover:underline cursor-pointer',
@@ -1449,7 +1612,11 @@ const CalendarItem: FC<{
           )}
         >
           <div className="text-start">
-            {state === 'DRAFT' ? t('draft', 'Draft') + ': ' : ''}
+            {state === 'DRAFT'
+              ? (post as any).pendingApproval
+                ? t('pending_approval', 'Pending approval') + ': '
+                : t('draft', 'Draft') + ': '
+              : ''}
           </div>
             <div className="w-full relative">
               <div className="absolute top-0 start-0 w-full text-ellipsis break-words line-clamp-1 text-start">
@@ -1635,6 +1802,49 @@ export const Recycle = () => {
       <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
       <path d="M7 21.9 3 18l4-3.9" />
       <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+};
+
+export const ApprovePost = () => {
+  const t = useT();
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      data-tooltip-id="tooltip"
+      data-tooltip-content={t('approve_post', 'Approve and queue')}
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+};
+
+export const RejectPost = () => {
+  const t = useT();
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      data-tooltip-id="tooltip"
+      data-tooltip-content={t('reject_post', 'Reject')}
+    >
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 };

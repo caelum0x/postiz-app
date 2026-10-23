@@ -283,4 +283,30 @@ export class OrganizationService {
       shortlink
     );
   }
+
+  getApprovalForQueueSetting(orgId: string) {
+    return this._organizationRepository.getApprovalForQueueSetting(orgId);
+  }
+
+  updateApprovalForQueueSetting(
+    orgId: string,
+    requireApprovalForQueue: boolean
+  ) {
+    return this._organizationRepository.updateApprovalForQueueSetting(
+      orgId,
+      requireApprovalForQueue
+    );
+  }
+
+  // Used by PostsService#createPost to decide whether a USER-level member's
+  // schedule/now save should be held as a pendingApproval draft instead of
+  // going straight to QUEUE. A tiny wrapper (rather than inlining the
+  // repository call there) so the "what counts as true" logic - including
+  // the null-org edge case - lives in one place.
+  async requiresApprovalForQueue(orgId: string): Promise<boolean> {
+    const org = await this._organizationRepository.getApprovalForQueueSetting(
+      orgId
+    );
+    return !!org?.requireApprovalForQueue;
+  }
 }

@@ -126,6 +126,7 @@ model User {
   oauthAuthorizations   OAuthAuthorization[]
   assignedComments      Comments[]           @relation("CommentAssignee")
   notifications         Notifications[]
+  createdPosts          Post[]               @relation("PostCreatedBy")
 
   @@unique([email, providerName])
   @@index([lastReadNotifications])
@@ -508,6 +509,12 @@ model Post {
   // (stays DRAFT, cleared so it reads as a normal draft again). Additive,
   // defaults false for every existing row.
   pendingApproval            Boolean                   @default(false)
+  // Who saved this post (WEB dashboard only - API/MCP/agent/autopost/bulk
+  // CSV/evergreen never set it, same additive-optional spirit as every
+  // other actor column here). Lets an ADMIN/SUPERADMIN approving or
+  // rejecting a pendingApproval post know, and notify, who submitted it.
+  // Additive, nullable, defaults null for every existing row.
+  createdByUserId            String?
   createdAt                  DateTime                  @default(now())
   updatedAt                  DateTime                  @updatedAt
   deletedAt                  DateTime?
@@ -521,6 +528,7 @@ model Post {
   childrenPost               Post[]                    @relation("parentPostId")
   submittedForOrder          Orders?                   @relation(fields: [submittedForOrderId], references: [id])
   submittedForOrganization   Organization?             @relation("submittedForOrg", fields: [submittedForOrganizationId], references: [id])
+  createdBy                  User?                     @relation("PostCreatedBy", fields: [createdByUserId], references: [id])
   tags                       TagsPosts[]
   postEngagementSnapshot     PostEngagementSnapshot?
   evergreenRecycles          EvergreenRecycle[]
@@ -542,6 +550,7 @@ model Post {
   @@index([releaseURL])
   @@index([integrationId])
   @@index([pendingApproval])
+  @@index([createdByUserId])
 }
 
 // One row per Post, captured at most once (postId is unique, upserted in

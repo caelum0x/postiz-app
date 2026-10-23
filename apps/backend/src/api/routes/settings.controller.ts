@@ -15,6 +15,7 @@ import { OrganizationService } from '@gitroom/nestjs-libraries/database/prisma/o
 import { AddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/add.team.member.dto';
 import { AdminAddTeamMemberDto } from '@gitroom/nestjs-libraries/dtos/settings/admin.add.team.member.dto';
 import { ShortlinkPreferenceDto } from '@gitroom/nestjs-libraries/dtos/settings/shortlink-preference.dto';
+import { ApprovalForQueueDto } from '@gitroom/nestjs-libraries/dtos/settings/approval-for-queue.dto';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthorizationActions, Sections } from '@gitroom/backend/services/auth/permissions/permission.exception.class';
 
@@ -98,6 +99,23 @@ export class SettingsController {
     return this._organizationService.updateShortlinkPreference(
       org.id,
       body.shortlink
+    );
+  }
+
+  @Get('/approval-queue')
+  async getApprovalQueueSetting(@GetOrgFromRequest() org: Organization) {
+    return this._organizationService.getApprovalForQueueSetting(org.id);
+  }
+
+  @Post('/approval-queue')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async updateApprovalQueueSetting(
+    @GetOrgFromRequest() org: Organization,
+    @Body() body: ApprovalForQueueDto
+  ) {
+    return this._organizationService.updateApprovalForQueueSetting(
+      org.id,
+      body.requireApprovalForQueue
     );
   }
 }

@@ -202,6 +202,7 @@ export class PostsRepository {
         intervalInDays: true,
         group: true,
         creationMethod: true,
+        pendingApproval: true,
         settings: true,
         tags: {
           where: {
@@ -327,6 +328,7 @@ export class PostsRepository {
           intervalInDays: true,
           group: true,
           creationMethod: true,
+          pendingApproval: true,
           tags: {
             where: {
               tag: {
@@ -357,6 +359,46 @@ export class PostsRepository {
       limit,
       hasMore: skip + posts.length < total,
     };
+  }
+
+  // Backs the ADMIN/SUPERADMIN-only "Pending Approvals" list (settings/team
+  // page) - every DRAFT a USER-level member couldn't queue directly because
+  // the org has Organization.requireApprovalForQueue on. Scoped to
+  // pendingApproval (not just "every draft"), so normal, never-submitted
+  // drafts never show up here.
+  getPendingApprovalPosts(orgId: string) {
+    return this._post.model.post.findMany({
+      where: {
+        organizationId: orgId,
+        deletedAt: null,
+        pendingApproval: true,
+        state: State.DRAFT,
+      },
+      orderBy: {
+        publishDate: 'asc',
+      },
+      select: {
+        id: true,
+        content: true,
+        publishDate: true,
+        group: true,
+        integration: {
+          select: {
+            id: true,
+            providerIdentifier: true,
+            name: true,
+            picture: true,
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
   }
 
   async deletePost(orgId: string, group: string) {
@@ -515,6 +557,14 @@ export class PostsRepository {
       },
       data: {
         state,
+        // Every path that calls changeState is an intentional, final state
+        // transition (schedule/approve, republish, mark published/errored),
+        // so any pendingApproval flag left over from the USER-level
+        // approval gate (see Organization.requireApprovalForQueue) is
+        // always stale by the time we get here - clear it. A pending post
+        // never reaches this method any other way, since createPost skips
+        // starting its workflow while pendingApproval is true.
+        pendingApproval: false,
         ...(err
           ? { error: typeof err === 'string' ? err : JSON.stringify(err) }
           : {}),
@@ -617,7 +667,15 @@ export class PostsRepository {
     keepGroup = false,
     // Shared by the posts saved together for several channels, so opening one
     // of them in the editor brings the others.
-    batchId?: string
+    batchId?: string,
+    // WEB-dashboard only (see PostsService#createPost) - who saved this post,
+    // stamped on create so an approver can be notified of who submitted it.
+    createdByUserId?: string,
+    // true when a USER-level member tried to schedule/publish-now while the
+    // org has Organization.requireApprovalForQueue on - holds the post as a
+    // DRAFT with pendingApproval set instead of the state `state` would
+    // otherwise produce. See PostsService#createPost/#approvePendingQueuePost.
+    pendingApproval = false
   ) {
     const posts: Post[] = [];
     const uuid = uuidv4();
@@ -679,11 +737,17 @@ export class PostsRepository {
         intervalInDays: inter ? +inter : null,
         approvedSubmitForOrder: APPROVED_SUBMIT_FOR_ORDER.NO,
         ...(type === 'create' ? { creationMethod } : {}),
+        ...(type === 'create' && createdByUserId
+          ? { createdBy: { connect: { id: createdByUserId } } }
+          : {}),
         ...(state === 'update'
           ? {}
+          : pendingApproval
+          ? { state: 'DRAFT' as const, pendingApproval: true }
           : {
               state:
                 state === 'draft' ? ('DRAFT' as const) : ('QUEUE' as const),
+              pendingApproval: false,
             }),
         image: JSON.stringify(value.image),
         settings: JSON.stringify(body.settings),

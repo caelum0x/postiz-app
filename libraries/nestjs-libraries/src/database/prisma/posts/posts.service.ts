@@ -1133,10 +1133,24 @@ export class PostsService {
     orgId: string,
     body: CreatePostDto,
     creationMethod: CreationMethod,
-    keepGroup = false
+    keepGroup = false,
+    // WEB dashboard only (see PostsController#createPost) - every other
+    // creation path (API, MCP, autopost, bulk CSV, evergreen, clipping)
+    // never passes this, so they're entirely unaffected by the approval
+    // gate below, same as before this field existed.
+    createdBy?: { userId: string; role: Role }
   ): Promise<any[]> {
     const postList = [];
     const batchId = uuidv4();
+    // A USER-level team member trying to schedule/publish-now is held as a
+    // pendingApproval draft instead, when the org has that gate on (see
+    // Organization.requireApprovalForQueue). ADMIN/SUPERADMIN callers skip
+    // this entirely. See approvePendingQueuePost/rejectPendingQueuePost
+    // below for the other half of this flow.
+    const needsApproval =
+      createdBy?.role === Role.USER &&
+      (body.type === 'schedule' || body.type === 'now') &&
+      (await this._organizationService.requiresApprovalForQueue(orgId));
     for (const post of body.posts) {
       if (
         (body.type === 'schedule' || body.type === 'now') &&
@@ -1179,7 +1193,9 @@ export class PostsService {
         creationMethod,
         body.inter,
         keepGroup,
-        batchId
+        batchId,
+        createdBy?.userId,
+        needsApproval
       );
 
       if (!posts?.length) {
@@ -1204,6 +1220,11 @@ export class PostsService {
       postList.push({
         postId: posts[0].id,
         integration: post.integration.id,
+        // Lets PostsController#createPost's caller (the dashboard's save
+        // flow) show "submitted for approval" instead of "scheduled" -
+        // additive, every existing consumer of this array already ignores
+        // unknown keys.
+        pendingApproval: posts[0].state === 'DRAFT' && needsApproval,
       });
     }
 
@@ -1507,6 +1528,67 @@ export class PostsService {
     } catch (err) {}
 
     return { id, state };
+  }
+
+  // ADMIN/SUPERADMIN-only list backing the "Pending Approvals" view
+  // (settings/team page) - see Organization.requireApprovalForQueue.
+  async getPendingApprovalPosts(orgId: string) {
+    return this._postRepository.getPendingApprovalPosts(orgId);
+  }
+
+  // ADMIN/SUPERADMIN-only counterpart to the USER-level gate in createPost.
+  // Reuses changePostStatus - the exact path the internal "schedule"
+  // button and the public-preview approvePublicPost already go through -
+  // so the real publish workflow actually starts, instead of a bare
+  // changeState that would only flip the DB row.
+  async approvePendingQueuePost(orgId: string, postId: string) {
+    const post = await this._postRepository.getPostById(postId, orgId);
+    if (!post || post.state !== 'DRAFT' || !post.pendingApproval) {
+      throw new NotFoundException(
+        'No pending-approval post found with this id'
+      );
+    }
+
+    const updated = await this.changePostStatus(orgId, postId, 'schedule');
+
+    if (post.createdByUserId) {
+      await this._notificationService
+        .notifyUser(
+          orgId,
+          post.createdByUserId,
+          'Your post was approved and is now queued to publish.'
+        )
+        .catch(() => {});
+    }
+
+    return updated;
+  }
+
+  // Leaves the post exactly as the USER-level member left it - a normal,
+  // still-editable draft - just no longer pendingApproval. changeState
+  // always clears the flag (see posts.repository.ts), so this never starts
+  // the publish workflow the way changePostStatus/approvePendingQueuePost do.
+  async rejectPendingQueuePost(orgId: string, postId: string) {
+    const post = await this._postRepository.getPostById(postId, orgId);
+    if (!post || post.state !== 'DRAFT' || !post.pendingApproval) {
+      throw new NotFoundException(
+        'No pending-approval post found with this id'
+      );
+    }
+
+    await this._postRepository.changeState(postId, 'DRAFT');
+
+    if (post.createdByUserId) {
+      await this._notificationService
+        .notifyUser(
+          orgId,
+          post.createdByUserId,
+          'Your post was rejected and remains a draft.'
+        )
+        .catch(() => {});
+    }
+
+    return { id: postId, state: 'DRAFT' as State };
   }
 
   async changeDate(

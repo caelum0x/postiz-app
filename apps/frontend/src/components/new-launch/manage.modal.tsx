@@ -748,6 +748,7 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
           // every type of save is its own request, the drafts last, since a
           // draft save skips the checks the others still run
           let saved = false;
+          let pendingApproval = false;
           for (const requestType of ['update', 'schedule', 'now', 'draft']) {
             const request = {
               type: requestType,
@@ -782,6 +783,27 @@ export const ManageModal: FC<AddEditModalProps> = (props) => {
               return;
             }
             saved = true;
+            // Set when the org has requireApprovalForQueue on and this
+            // caller is a USER-level member - the save was held as a draft
+            // awaiting an ADMIN/SUPERADMIN instead of being scheduled (see
+            // PostsService#createPost).
+            const savedPosts = await response.json().catch(() => []);
+            if (
+              Array.isArray(savedPosts) &&
+              savedPosts.some((p: any) => p?.pendingApproval)
+            ) {
+              pendingApproval = true;
+            }
+          }
+
+          if (pendingApproval) {
+            toaster.show(
+              t(
+                'submitted_for_approval',
+                'Submitted for approval - an admin needs to approve it before it is queued'
+              ),
+              'warning'
+            );
           }
         }
 

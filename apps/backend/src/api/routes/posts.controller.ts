@@ -273,6 +273,14 @@ export class PostsController {
     return this._postsService.getPostsByGroup(org.id, group);
   }
 
+  // Declared before the generic '/:id' GET below so Nest doesn't try to
+  // resolve this literal path as an :id param.
+  @Get('/pending-approval')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async getPendingApprovalPosts(@GetOrgFromRequest() org: Organization) {
+    return this._postsService.getPendingApprovalPosts(org.id);
+  }
+
   @Get('/:id')
   getPost(@GetOrgFromRequest() org: Organization, @Param('id') id: string) {
     return this._postsService.getPost(org.id, id);
@@ -290,6 +298,7 @@ export class PostsController {
   @CheckPolicies([AuthorizationActions.Create, Sections.POSTS_PER_MONTH])
   async createPost(
     @GetOrgFromRequest() org: Organization,
+    @GetUserFromRequest() user: User,
     @Body() rawBody: any
   ) {
     // Server-side validation — never trust the client to have validated.
@@ -330,7 +339,17 @@ export class PostsController {
     }
 
     const body = await this._postsService.mapTypeToPost(rawBody, org.id);
-    return this._postsService.createPost(org.id, body, 'WEB');
+    // The auth middleware populates org.users with the caller's own
+    // membership row (see organization.service.ts for the same pattern) -
+    // this is the only place that reads it as a role, so the Organization
+    // type doesn't declare it.
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    const callerRole = org.users?.[0]?.role;
+    return this._postsService.createPost(org.id, body, 'WEB', false, {
+      userId: user.id,
+      role: callerRole,
+    });
   }
 
   @Get('/bulk-schedule/supported-providers')
@@ -406,6 +425,26 @@ export class PostsController {
     @Body('republish') republish = false
   ) {
     return this._postsService.changeDate(org.id, id, date, action, republish);
+  }
+
+  // ADMIN/SUPERADMIN-only - approve/reject a USER-level member's post held
+  // back by Organization.requireApprovalForQueue (see PostsService#createPost).
+  @Put('/:id/approve-queue')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async approvePendingQueuePost(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._postsService.approvePendingQueuePost(org.id, id);
+  }
+
+  @Put('/:id/reject-queue')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async rejectPendingQueuePost(
+    @GetOrgFromRequest() org: Organization,
+    @Param('id') id: string
+  ) {
+    return this._postsService.rejectPendingQueuePost(org.id, id);
   }
 
   @Post('/separate-posts')

@@ -17,6 +17,8 @@ import { useToaster } from '@gitroom/react/toaster/toaster';
 import { deleteDialog } from '@gitroom/react/helpers/delete.dialog';
 import copy from 'copy-to-clipboard';
 import { useT } from '@gitroom/react/translation/get.transation.service.client';
+import ApprovalQueuePreferenceComponent from '@gitroom/frontend/components/settings/approval-queue-preference.component';
+import { PendingApprovalsComponent } from '@gitroom/frontend/components/settings/pending-approvals.component';
 
 const roles = [
   {
@@ -272,6 +274,12 @@ export const TeamsComponent = () => {
           )}
         </div>
       </div>
+      {+myLevel >= 1 && (
+        <>
+          <ApprovalQueuePreferenceComponent />
+          <PendingApprovalsComponent />
+        </>
+      )}
     </div>
   );
 };

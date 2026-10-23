@@ -744,4 +744,32 @@ export class OrganizationRepository {
       },
     });
   }
+
+  getApprovalForQueueSetting(orgId: string) {
+    return this._organization.model.organization.findUnique({
+      where: {
+        id: orgId,
+      },
+      select: {
+        requireApprovalForQueue: true,
+      },
+    });
+  }
+
+  updateApprovalForQueueSetting(
+    orgId: string,
+    requireApprovalForQueue: boolean
+  ) {
+    return this._organization.model.organization.update({
+      where: {
+        id: orgId,
+      },
+      data: {
+        requireApprovalForQueue,
+      },
+      select: {
+        requireApprovalForQueue: true,
+      },
+    });
+  }
 }

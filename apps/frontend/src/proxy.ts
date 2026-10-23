@@ -48,6 +48,9 @@ export async function proxy(request: NextRequest) {
     nextUrl.pathname.startsWith('/p/') ||
     nextUrl.pathname.startsWith('/provider/') ||
     nextUrl.pathname.startsWith('/icons/') ||
+    // bottom-of-funnel SEO landing pages - must stay reachable by signed-out
+    // visitors (that's the entire audience searching "X vs Postiz")
+    nextUrl.pathname.startsWith('/compare/') ||
     // the consent screen of MCP / OAuth clients handles signed-out visitors
     // itself (sign in and come back, or connect a self-hosted instance)
     nextUrl.pathname.startsWith('/oauth/authorize')
